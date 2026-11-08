@@ -8,7 +8,7 @@ import {
   CommandPermissionLevel,
   CustomCommandStatus
 } from "@minecraft/server";
-import { ModalFormData } from "@minecraft/server-ui";
+import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/server-ui";
 
 /*
  * ZP-AC Bedrock Core | Minecraft Bedrock 1.26.60
@@ -795,7 +795,187 @@ function openReportMenu(player) {
     });
 }
 
-system.beforeEvents.startup.subscribe(event => {
+
+/* ===== ZP-AC administrator panel: native Bedrock server forms ===== */
+const ADMIN_UI_COMMAND = "zp_ac:admin";
+const ADMIN_TAGS_UI = ["zp_ac_admin", "zp:ac_admin"];
+
+function isUiAdmin(player) {
+  try {
+    return ADMIN_TAGS_UI.some((tag) => player.hasTag(tag));
+  } catch {
+    return false;
+  }
+}
+
+function uiAdminMessage(player, message) {
+  try { player.sendMessage(`§8[§cZP-AC 管理§8] §r${message}`); } catch { /* player left */ }
+}
+
+function showAdminPanel(player) {
+  if (!isUiAdmin(player)) {
+    uiAdminMessage(player, "没有管理权限。请由服务器管理员为你添加标签 zp_ac_admin。");
+    return;
+  }
+
+  const online = world.getPlayers().filter((p) => !isUiAdmin(p));
+  const pluginOnline = isPluginOnline();
+  const form = new ActionFormData()
+    .title("§l§cZP-AC 管理控制台")
+    .body(
+      "§7独立反作弊 + Endstone 增强层\n\n" +
+      "§f运行模式：§a" + (pluginOnline ? "插件增强模式" : "行为包独立模式") + "\n" +
+      "§f在线玩家：§e" + world.getPlayers().length + "\n" +
+      "§f监控会话：§e" + sessions.size + "\n" +
+      "§f本地历史：§e" + history.length + " 条\n\n" +
+      "§8本界面按需打开，不使用常驻 HUD。"
+    )
+    .button("§l系统状态")
+    .button("§l在线玩家监控")
+    .button("§l最近检测记录")
+    .button("§l插件管理命令帮助")
+    .button("§c关闭");
+
+  form.show(player).then((response) => {
+    if (response.canceled) return;
+    switch (response.selection) {
+      case 0:
+        showAdminStatus(player);
+        break;
+      case 1:
+        showAdminPlayers(player);
+        break;
+      case 2:
+        showAdminHistory(player);
+        break;
+      case 3:
+        uiAdminMessage(player,
+          "插件管理命令：/zpac top、/zpac candidates、/zpac trust <玩家名或UUID>、" +
+          "/zpac confirmban <UUID>、/zpac pardon <UUID>、/zpac cloud status。\n" +
+          "永久封禁必须人工确认；可信分和风险分只在服务端管理端显示。"
+        );
+        break;
+      default:
+        break;
+    }
+  }).catch((error) => {
+    console.warn("[ZP-AC] 管理主界面打开失败: " + error);
+    uiAdminMessage(player, "界面暂时无法打开，请稍后重试。");
+  });
+}
+
+function showAdminStatus(player) {
+  if (!isUiAdmin(player)) return;
+  const body =
+    "§l§f运行状态\n" +
+    "§f行为包版本：§e2.1.0\n" +
+    "§f插件桥接：§" + (isPluginOnline() ? "a已连接" : "e未连接/独立运行") + "\n" +
+    "§f在线玩家：§e" + world.getPlayers().length + "\n" +
+    "§f活跃监控会话：§e" + sessions.size + "\n" +
+    "§f历史证据：§e" + history.length + "\n" +
+    "§f插件租约剩余：§e" + Math.max(0, Math.ceil((pluginLeaseUntil - tickCounter) / 20)) + " 秒\n\n" +
+    "§7插件未连接时，行为包基础检测和本地历史仍继续运行。";
+  new MessageFormData()
+    .title("§l系统状态")
+    .body(body)
+    .button1("返回控制台")
+    .button2("关闭")
+    .show(player)
+    .then((response) => {
+      if (!response.canceled && response.selection === 0) showAdminPanel(player);
+    })
+    .catch((error) => console.warn("[ZP-AC] 状态界面失败: " + error));
+}
+
+function showAdminPlayers(player) {
+  if (!isUiAdmin(player)) return;
+  const players = world.getPlayers().filter((p) => !isUiAdmin(p));
+  if (!players.length) {
+    uiAdminMessage(player, "当前没有可查看的普通在线玩家。");
+    return;
+  }
+  const form = new ActionFormData().title("§l在线玩家监控").body("§7选择玩家查看行为包侧监控摘要。");
+  for (const target of players.slice(0, 40)) {
+    const session = sessions.get(target.id);
+    const status = session ? "§a监控中" : "§7等待采样";
+    form.button(target.name + "\n" + status);
+  }
+  form.button("§c返回");
+  form.show(player).then((response) => {
+    if (response.canceled || response.selection === undefined) return;
+    if (response.selection >= Math.min(players.length, 40)) {
+      showAdminPanel(player);
+      return;
+    }
+    const target = players[response.selection];
+    if (target) showAdminPlayerDetail(player, target.id);
+  }).catch((error) => console.warn("[ZP-AC] 玩家列表界面失败: " + error));
+}
+
+function showAdminPlayerDetail(admin, targetId) {
+  if (!isUiAdmin(admin)) return;
+  const target = world.getPlayers().find((p) => p.id === targetId);
+  if (!target) {
+    uiAdminMessage(admin, "该玩家已离线。");
+    return;
+  }
+  const session = sessions.get(target.id);
+  const body = session
+    ? "§f玩家：§e" + cleanText(target.name, 64) + "\n" +
+      "§f状态：§a基础行为监控中\n" +
+      "§f累计举报：§e" + session.reportCount + "\n" +
+      "§f最近证据时间：§e" + Math.max(0, Math.floor((tickCounter - session.lastEvidenceAt) / 20)) + " 秒前\n" +
+      "§f已记录原因：§e" + (session.reasons.length ? session.reasons.join("、") : "无") + "\n" +
+      "§f最近位置：§e" + coords(target) + "\n\n" +
+      "§7此处只显示行为包本地信息；插件隐藏画像不会发送到客户端。"
+    : "§f玩家：§e" + cleanText(target.name, 64) + "\n§7当前尚无独立行为包会话摘要。";
+  new MessageFormData()
+    .title("§l玩家监控摘要")
+    .body(body)
+    .button1("返回玩家列表")
+    .button2("关闭")
+    .show(admin)
+    .then((response) => {
+      if (!response.canceled && response.selection === 0) showAdminPlayers(admin);
+    })
+    .catch((error) => console.warn("[ZP-AC] 玩家详情界面失败: " + error));
+}
+
+function showAdminHistory(player) {
+  if (!isUiAdmin(player)) return;
+  const entries = history.slice(-12).reverse();
+  if (!entries.length) {
+    uiAdminMessage(player, "当前没有本地历史记录。");
+    return;
+  }
+  const form = new ActionFormData().title("§l最近检测记录").body("§7最近 12 条本地记录，选择一条查看详情。");
+  for (const entry of entries) {
+    const label = cleanText(entry.target || entry.type || "记录", 48);
+    const kind = cleanText(entry.title || entry.code || entry.type || "事件", 48);
+    form.button(label + "\n§8" + kind);
+  }
+  form.button("§c返回");
+  form.show(player).then((response) => {
+    if (response.canceled || response.selection === undefined) return;
+    if (response.selection >= entries.length) {
+      showAdminPanel(player);
+      return;
+    }
+    const entry = entries[response.selection];
+    const detail = JSON.stringify(entry, null, 2);
+    new MessageFormData()
+      .title("§l记录详情")
+      .body("§7" + detail.slice(0, 3500))
+      .button1("返回记录")
+      .button2("关闭")
+      .show(player)
+      .then((next) => {
+        if (!next.canceled && next.selection === 0) showAdminHistory(player);
+      });
+  }).catch((error) => console.warn("[ZP-AC] 历史记录界面失败: " + error));
+}
+
+\nsystem.beforeEvents.startup.subscribe(event => {
     event.customCommandRegistry.registerCommand({
         name: REPORT_UI_CONFIG.command,
         description: "打开玩家举报系统",
@@ -807,6 +987,20 @@ system.beforeEvents.startup.subscribe(event => {
             return { status: CustomCommandStatus.Failure, message: "此指令只能由玩家执行。" };
         }
         system.run(() => openReportMenu(player));
+        return { status: CustomCommandStatus.Success };
+    });
+
+    event.customCommandRegistry.registerCommand({
+        name: ADMIN_UI_COMMAND,
+        description: "打开 ZP-AC 管理员控制台",
+        permissionLevel: CommandPermissionLevel.GameDirectors,
+        cheatsRequired: false
+    }, origin => {
+        const player = origin.initiator ?? origin.sourceEntity;
+        if (!(player instanceof Player)) {
+            return { status: CustomCommandStatus.Failure, message: "此指令只能由玩家执行。" };
+        }
+        system.run(() => showAdminPanel(player));
         return { status: CustomCommandStatus.Success };
     });
     console.warn("[PlayerReport] 举报 UI 已加载；独立基础检测不依赖 Endstone，插件仅提供增强功能。");
