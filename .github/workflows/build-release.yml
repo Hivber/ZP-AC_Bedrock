@@ -1,0 +1,84 @@
+name: Build ZP-AC release packages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check JavaScript syntax
+        run: node --check --input-type=module < mcaddon/scripts/main.js
+
+      - name: Check Python syntax
+        run: python -m compileall -q plugins/endstone_zp_anticheat tools
+
+      - name: Validate manifest, protocols and versions
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import tomllib
+          from pathlib import Path
+
+          manifest = json.loads(Path("mcaddon/manifest.json").read_text(encoding="utf-8"))
+          script = Path("mcaddon/scripts/main.js").read_text(encoding="utf-8")
+          plugin = Path("plugins/endstone_zp_anticheat/plugin.py").read_text(encoding="utf-8")
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
+
+          assert manifest["header"]["version"] == [2, 1, 2]
+          assert manifest["modules"][0]["version"] == [2, 1, 2]
+          assert manifest["header"]["min_engine_version"] == [1, 26, 60]
+          assert project["project"]["version"] == "0.6.1"
+          assert 'version = "0.6.1"' in plugin
+          assert 'command: "zp_ac:ba"' in script
+          assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
+          assert "playerreport:ba" not in script
+          assert "zp:ac_admin_request" in script and "zp:ac_admin_response" in script
+          assert "zp:ac_admin_request" in plugin and "zp:ac_admin_response" in plugin
+          assert config["behavior_pack_bridge_enabled"] is True
+          print("ZP-AC manifest, version, protocol and config checks passed.")
+          PY
+
+      - name: Install wheel builder
+        run: python -m pip install --upgrade build
+
+      - name: Build the single addon and plugin wheel
+        run: python tools/build_release.py
+
+      - name: Verify release outputs
+        run: |
+          test "$(find dist -maxdepth 1 -name '*.mcaddon' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -name '*.whl' | wc -l)" -eq 1
+          ls -lh dist/
+
+      - name: Upload ZP-AC packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZP-AC-2.1.2-and-Endstone-0.6.1
+          path: |
+            dist/*.mcaddon
+            dist/*.whl
+          if-no-files-found: error
+          retention-days: 90
