@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import unquote
 from typing import Any
 
-from endstone.command import Command, CommandSender
+from endstone.command import Command, CommandSender, ConsoleCommandSender
 
 from endstone.event import (
     ActorDamageEvent,
@@ -39,6 +39,10 @@ MESSAGE_ID = "zp:report_submitted"
 REPORT_VERSION = "zp-report-v1"
 BP_READY_ID = "zp:ac_plugin_ready"
 BP_EVIDENCE_ID = "zp:ac_bp_evidence"
+BP_ADMIN_REQUEST_ID = "zp:ac_admin_request"
+BP_ADMIN_RESPONSE_ID = "zp:ac_admin_response"
+BP_ADMIN_PROTOCOL = "zp-ac-admin-v1"
+BP_OP_ADMIN_TAG = "zp_ac_op_admin"
 BP_PROTOCOL = "zp-ac-bp-v1"
 BP_RULE_MAP = {
     "speed": ("speed_sustained", True),
@@ -50,7 +54,7 @@ BP_RULE_MAP = {
     "multi_target": ("multi_target_combat", False),
     "scaffold": ("scaffold_pattern", False),
 }
-ADMIN_TAGS = {"zp_ac_admin", "zp:ac_admin"}
+ADMIN_TAGS = {"zp_ac_admin", "zp:ac_admin", BP_OP_ADMIN_TAG}
 BYPASS_TAGS = {"zp_ac_bypass", "zp:ac_bypass"}
 
 RULE_TITLES = {
@@ -140,7 +144,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.0"
+    version = "0.6.1"
     commands = {
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
@@ -153,7 +157,7 @@ class ZPReportAntiCheat(Plugin):
     permissions = {
         "zp_report_anticheat.admin": {
             "description": "允许管理 ZP 反作弊、云端同步及确认永久封禁。",
-            "default": "op",
+            "default": True,
         }
     }
 
@@ -223,6 +227,7 @@ class ZPReportAntiCheat(Plugin):
         self._cloud_last_sync = 0.0
         self._closing = False
         self._bp_last_ready = 0.0
+        self._admin_request_last: dict[str, float] = {}
 
         self.register_events(self)
         self._pulse_task = self.server.scheduler.run_task(
@@ -233,7 +238,7 @@ class ZPReportAntiCheat(Plugin):
             f"自动踢出={self.cfg.get('auto_kick', True)}；隐藏可信画像={'启用' if self.cfg.get('trust_enabled', True) else '关闭'}；"
             "永久封禁必须管理员确认。"
         )
-        self.logger.info(f"通信：举报 {MESSAGE_ID}；插件就绪事件 {BP_READY_ID}；云端功能默认关闭。")
+        self.logger.info(f"通信：举报 {MESSAGE_ID}；插件握手 {BP_READY_ID}；管理桥接 {BP_ADMIN_REQUEST_ID}/{BP_ADMIN_RESPONSE_ID}；云端默认关闭。")
         if bool(self.cfg.get("cloud_enabled", False)):
             self._start_cloud_sync("startup")
 
@@ -270,16 +275,35 @@ class ZPReportAntiCheat(Plugin):
         except Exception as exc:
             self.logger.warning(f"写入反作弊证据日志失败: {exc}")
 
-    def _admins(self) -> list[Any]:
-        result = []
+    def _is_admin_player(self, player: Any) -> bool:
+        try:
+            tags = set(getattr(player, "scoreboard_tags", []) or [])
+            return bool(getattr(player, "is_op", False)) or bool(tags.intersection(ADMIN_TAGS))
+        except Exception:
+            return False
+
+    def _is_admin_sender(self, sender: CommandSender) -> bool:
+        if isinstance(sender, ConsoleCommandSender):
+            return True
+        target = self._find_online_player(_clean(getattr(sender, "name", ""), 64))
+        return bool(target and self._is_admin_player(target))
+
+    def _sync_operator_admin_tags(self) -> None:
+        # Bedrock Script API cannot inspect OP status directly. Mirror OP status into
+        # a reserved tag so the behavior-pack UI applies the same authorization rule.
         for player in list(self.server.online_players):
             try:
                 tags = set(getattr(player, "scoreboard_tags", []) or [])
-                if bool(getattr(player, "is_op", False)) or tags.intersection(ADMIN_TAGS):
-                    result.append(player)
+                is_op = bool(getattr(player, "is_op", False))
+                if is_op and BP_OP_ADMIN_TAG not in tags:
+                    player.add_scoreboard_tag(BP_OP_ADMIN_TAG)
+                elif not is_op and BP_OP_ADMIN_TAG in tags:
+                    player.remove_scoreboard_tag(BP_OP_ADMIN_TAG)
             except Exception:
                 continue
-        return result
+
+    def _admins(self) -> list[Any]:
+        return [player for player in list(self.server.online_players) if self._is_admin_player(player)]
 
     def _admin_alert(self, message: str) -> None:
         line = f"§8[§cZP反作弊§8] §r{message}"
@@ -794,6 +818,9 @@ class ZPReportAntiCheat(Plugin):
     def on_command(self, sender: CommandSender, command: Command, args: list[str]) -> bool:
         if command.name != "zpac":
             return True
+        if not self._is_admin_sender(sender):
+            sender.send_message("§c没有权限执行 ZP-AC 管理命令。需要 OP 或 zp_ac_admin 管理员标签。")
+            return True
         if not args:
             sender.send_message("§e用法：/zpac trust <玩家|UUID> | /zpac top [数量] | /zpac cloud <on|off|status|sync> | /zpac candidates | /zpac confirmban <UUID> | /zpac pardon <UUID>")
             return True
@@ -974,16 +1001,246 @@ class ZPReportAntiCheat(Plugin):
 
     # ----------------------------- report bridge -----------------------------
 
-    def _announce_behavior_pack_ready(self) -> None:
+    def _send_admin_response(
+        self,
+        admin_name: str,
+        request_id: str,
+        ok: bool,
+        data: dict[str, Any] | None = None,
+        error: str = "",
+    ) -> None:
+        payload = {
+            "version": BP_ADMIN_PROTOCOL,
+            "requestId": request_id,
+            "adminName": _clean(admin_name, 64),
+            "ok": bool(ok),
+            "data": data or {},
+            "error": _clean(error, 240),
+        }
+        encoded = base64.b64encode(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).decode("ascii")
+        try:
+            sent = self.server.dispatch_command(
+                self.server.command_sender,
+                f"scriptevent {BP_ADMIN_RESPONSE_ID} b64:{encoded}",
+            )
+            if not sent:
+                self.logger.warning("ZP-AC 管理响应 ScriptEvent 未执行。")
+        except Exception as exc:
+            self.logger.warning(f"发送 ZP-AC 管理响应失败：{type(exc).__name__}")
+
+    def _on_behavior_pack_admin_request(self, event: ScriptMessageEvent) -> None:
         if not bool(self.cfg.get("behavior_pack_bridge_enabled", True)):
             return
+        admin_name = ""
+        request_id = ""
         try:
-            self.server.dispatch_command(
+            payload = json.loads(unquote(event.message or ""))
+            if not isinstance(payload, dict) or payload.get("version") != BP_ADMIN_PROTOCOL:
+                return
+            admin_name = _clean(payload.get("adminName"), 64)
+            request_id = _clean(payload.get("requestId"), 80)
+            action = _clean(payload.get("action"), 32).lower()
+            if not admin_name or not request_id:
+                return
+
+            requester = self._find_online_player(admin_name)
+            if requester is None or not self._is_admin_player(requester):
+                self._send_admin_response(admin_name, request_id, False, error="管理员身份验证失败。")
+                return
+
+            # Requests emitted by the behavior-pack server command are console-originated.
+            # Direct player-originated ScriptEvents must match the authenticated OP/tagged player.
+            sender = getattr(event, "sender", None)
+            sender_key = _player_key(sender)
+            if sender_key:
+                if sender_key != _player_key(requester) or not self._is_admin_player(sender):
+                    self._send_admin_response(admin_name, request_id, False, error="请求来源与管理员身份不匹配。")
+                    return
+            elif not isinstance(sender, ConsoleCommandSender) and _clean(getattr(sender, "name", ""), 32).lower() not in {"server", "console"}:
+                self._send_admin_response(admin_name, request_id, False, error="不接受非服务端来源的管理请求。")
+                return
+
+            now = time.monotonic()
+            previous = self._admin_request_last.get(_player_key(requester) or admin_name, 0.0)
+            if now - previous < 0.75:
+                self._send_admin_response(admin_name, request_id, False, error="管理操作过于频繁，请稍后再试。")
+                return
+            self._admin_request_last[_player_key(requester) or admin_name] = now
+
+            value = _clean(payload.get("value"), 128)
+            player_uuid = self._canonical_uuid(payload.get("uuid"))
+            data: dict[str, Any]
+
+            if action == "overview":
+                cloud_ready, cloud_problem = self._cloud_config_ready()
+                data = {
+                    "plugin_version": self.version,
+                    "active_sessions": len(self.sessions),
+                    "candidate_count": len(self.ban_candidates),
+                    "local_ban_count": len(self.local_permanent_bans),
+                    "profile_count": len(self.player_profiles),
+                    "cloud_ban_count": len(self.cloud_ban_cache),
+                    "cloud_enabled": bool(self.cfg.get("cloud_enabled", False)),
+                    "cloud_config_ready": cloud_ready,
+                    "cloud_problem": cloud_problem,
+                }
+            elif action == "candidate_list":
+                candidates = sorted(
+                    self.ban_candidates.items(),
+                    key=lambda item: str(item[1].get("updated_at", "")),
+                    reverse=True,
+                )[:6]
+                data = {
+                    "candidates": [
+                        {
+                            "uuid": player_key,
+                            "player_name": _clean(record.get("player_name", ""), 24),
+                            "score": int(record.get("score", 0)),
+                            "reporter_count": int(record.get("reporter_count", 0)),
+                            "rules": [_clean(rule, 48) for rule in record.get("rules", [])[:4]],
+                        }
+                        for player_key, record in candidates
+                    ]
+                }
+            elif action == "bans":
+                data = {"uuids": sorted(self.local_permanent_bans)[:12]}
+            elif action == "trust":
+                resolved = self._resolve_player_uuid(value)
+                if not resolved:
+                    raise ValueError("未找到在线玩家或有效 UUID。")
+                profile = self._profile_for_uuid(resolved, create=False)
+                if profile is None:
+                    data = {
+                        "uuid": resolved,
+                        "trust": float(self.cfg.get("trust_initial_score", 50.0)),
+                        "risk": 0.0,
+                        "flags": 0,
+                        "strong_flags": 0,
+                        "active_seconds": 0.0,
+                        "last_rule": "",
+                    }
+                else:
+                    data = {
+                        "uuid": resolved,
+                        "trust": float(profile.get("trust", 50.0)),
+                        "risk": float(profile.get("risk", 0.0)),
+                        "flags": int(profile.get("flags", 0)),
+                        "strong_flags": int(profile.get("strong_flags", 0)),
+                        "active_seconds": float(profile.get("active_seconds", 0.0)),
+                        "last_rule": _clean(profile.get("last_rule", ""), 48),
+                    }
+            elif action == "confirmban":
+                if not player_uuid:
+                    raise ValueError("UUID 格式无效。")
+                with self._state_lock:
+                    candidate = self.ban_candidates.get(player_uuid)
+                    if not candidate:
+                        raise ValueError("没有该 UUID 的严重行为待复核候选，不能直接封禁。")
+                    self.local_permanent_bans.add(player_uuid)
+                    self.revoked_uuids.discard(player_uuid)
+                    self.ban_candidates.pop(player_uuid, None)
+                    local_copy = set(self.local_permanent_bans)
+                    revoked_copy = set(self.revoked_uuids)
+                self._save_uuid_set(self.local_bans_path, local_copy)
+                self._save_uuid_set(self.revocations_path, revoked_copy)
+                self._save_candidates()
+                target = next(
+                    (p for p in list(self.server.online_players) if _player_key(p) == player_uuid),
+                    None,
+                )
+                if target is not None:
+                    try:
+                        target.kick("§c管理员已通过 ZP-AC 管理界面确认永久 UUID 封禁。")
+                    except Exception:
+                        pass
+                self._log("permanent_ban_confirmed", target_uuid=player_uuid,
+                          score=candidate.get("score"), rules=candidate.get("rules", []),
+                          action="behavior_pack_admin_ui")
+                if bool(self.cfg.get("cloud_enabled", False)):
+                    self._start_cloud_sync("admin_ui_confirmed_permanent_ban")
+                data = {"message": "永久 UUID 封禁已写入本地；云端同步按当前配置执行。"}
+            elif action == "pardon":
+                if not player_uuid:
+                    raise ValueError("UUID 格式无效。")
+                with self._state_lock:
+                    existed = player_uuid in self.local_permanent_bans or player_uuid in self.cloud_ban_cache
+                    self.local_permanent_bans.discard(player_uuid)
+                    self.cloud_ban_cache.discard(player_uuid)
+                    self.revoked_uuids.add(player_uuid)
+                    self.ban_candidates.pop(player_uuid, None)
+                    profile = self._profile_for_uuid(player_uuid, create=False)
+                    if profile is not None:
+                        profile["trust"] = max(50.0, float(self.cfg.get("trust_initial_score", 50.0)))
+                        profile["risk"] = 0.0
+                        profile["last_flag_at"] = 0.0
+                        profile["last_rule"] = "admin_review_cleared"
+                        self._profiles_dirty = True
+                    local_copy = set(self.local_permanent_bans)
+                    cache_copy = set(self.cloud_ban_cache)
+                    revoked_copy = set(self.revoked_uuids)
+                self._save_uuid_set(self.local_bans_path, local_copy)
+                self._save_uuid_set(self.cloud_cache_path, cache_copy)
+                self._save_uuid_set(self.revocations_path, revoked_copy)
+                self._save_candidates()
+                if self._profiles_dirty:
+                    self._save_profiles()
+                if bool(self.cfg.get("cloud_enabled", False)):
+                    self._start_cloud_sync("admin_ui_pardon")
+                self._log("permanent_ban_revoked", target_uuid=player_uuid, existed=existed,
+                          action="behavior_pack_admin_ui")
+                data = {"message": "已撤销本地 UUID 封禁并重置内部画像；云端撤销按同步设置执行。"}
+            elif action == "cloud_status":
+                ready, problem = self._cloud_config_ready()
+                data = {
+                    "enabled": bool(self.cfg.get("cloud_enabled", False)),
+                    "read_token_configured": bool(str(self.cfg.get("cloud_read_token", "") or "").strip()),
+                    "write_token_configured": bool(str(self.cfg.get("cloud_write_token", "") or "").strip()),
+                    "local_ban_count": len(self.local_permanent_bans),
+                    "cloud_ban_count": len(self.cloud_ban_cache),
+                    "config_ready": ready,
+                    "problem": problem,
+                }
+            elif action == "cloud_on":
+                ready, problem = self._cloud_config_ready()
+                if not ready:
+                    raise ValueError(f"云端配置不完整：{problem}")
+                self._set_cloud_enabled(True)
+                data = {"message": "云端 UUID 同步已启用，后台同步已启动。"}
+            elif action == "cloud_off":
+                self._set_cloud_enabled(False)
+                data = {"message": "云端同步已关闭；本地封禁仍然有效。"}
+            elif action == "cloud_sync":
+                if not bool(self.cfg.get("cloud_enabled", False)):
+                    raise ValueError("云端功能当前关闭。")
+                if not self._start_cloud_sync("admin_ui_manual"):
+                    raise ValueError("同步未启动：可能正在同步或配置不完整。")
+                data = {"message": "云端同步已在后台启动。"}
+            else:
+                raise ValueError("不支持的管理操作。")
+
+            self._send_admin_response(admin_name, request_id, True, data=data)
+        except Exception as exc:
+            self._send_admin_response(
+                admin_name, request_id, False,
+                error=_clean(str(exc) or type(exc).__name__, 240),
+            )
+
+    def _announce_behavior_pack_ready(self) -> bool:
+        if not bool(self.cfg.get("behavior_pack_bridge_enabled", True)):
+            return False
+        try:
+            sent = self.server.dispatch_command(
                 self.server.command_sender,
                 f"scriptevent {BP_READY_ID} {BP_PROTOCOL}",
             )
+            if not sent:
+                self.logger.warning("ZP-AC 行为包握手命令未执行；将在下一轮重试。")
+            return bool(sent)
         except Exception as exc:
-            self.logger.warning(f"向 ZP-AC 行为包发送握手响应失败: {exc}")
+            self.logger.warning(f"向 ZP-AC 行为包发送握手响应失败: {type(exc).__name__}: {exc}")
+            return False
 
     def _on_behavior_pack_evidence(self, event: ScriptMessageEvent) -> None:
         if not bool(self.cfg.get("behavior_pack_bridge_enabled", True)):
@@ -1044,6 +1301,9 @@ class ZPReportAntiCheat(Plugin):
     @event_handler
     def on_script_message(self, event: ScriptMessageEvent) -> None:
         message_id = getattr(event, "message_id", "")
+        if message_id == BP_ADMIN_REQUEST_ID:
+            self._on_behavior_pack_admin_request(event)
+            return
         if message_id == BP_EVIDENCE_ID:
             self._on_behavior_pack_evidence(event)
             return
@@ -1636,7 +1896,8 @@ class ZPReportAntiCheat(Plugin):
     def _pulse(self) -> None:
         self._drain_cloud_results()
         now = time.monotonic()
-        if bool(self.cfg.get("behavior_pack_bridge_enabled", True)) and now - self._bp_last_ready >= 5.0:
+        self._sync_operator_admin_tags()
+        if bool(self.cfg.get("behavior_pack_bridge_enabled", True)) and now - self._bp_last_ready >= 30.0:
             self._bp_last_ready = now
             self._announce_behavior_pack_ready()
         if bool(self.cfg.get("cloud_enabled", False)):
