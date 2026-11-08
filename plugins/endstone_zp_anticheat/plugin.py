@@ -2052,6 +2052,15 @@ class ZPReportAntiCheat(Plugin):
 
     @event_handler
     def on_player_join(self, event: PlayerJoinEvent) -> None:
+        try:
+            if bool(getattr(event.player, "is_op", False)):
+                event.player.add_scoreboard_tag(BP_OP_ADMIN_TAG)
+            else:
+                tags = set(getattr(event.player, "scoreboard_tags", []) or [])
+                if BP_OP_ADMIN_TAG in tags:
+                    event.player.remove_scoreboard_tag(BP_OP_ADMIN_TAG)
+        except Exception:
+            pass
         key = _player_key(event.player)
         if key and key in self.sessions:
             self.sessions[key]["offline_since"] = None
