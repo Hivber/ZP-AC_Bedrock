@@ -822,7 +822,7 @@ function uiAdminMessage(player, message) {
 
 function showAdminPanel(player) {
   if (!isUiAdmin(player)) {
-    uiAdminMessage(player, "没有管理权限。请由服务器管理员执行：/tag " + player.name + " add zp_ac_admin，然后重新输入 /zp_ac:admin。");
+    uiAdminMessage(player, "没有管理权限。请由服务器管理员为你添加标签：/tag @s add zp_ac_admin，然后重新输入 /zp_ac:admin。");
     return;
   }
 
