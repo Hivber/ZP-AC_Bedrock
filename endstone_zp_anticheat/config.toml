@@ -1,0 +1,96 @@
+# 接入 ZP-AC 独立基础行为包（BDS/其他可运行 Script API 的服务端无需安装此插件）
+# true：插件通过 ScriptEvent 心跳识别行为包，并接收行为证据用于增强评分/处罚。
+behavior_pack_bridge_enabled = true
+
+# ZP 举报联动反作弊配置
+# 自动踢出只由多项独立行为证据触发；举报数量本身不会触发踢出。
+
+auto_kick = true
+
+# 监控生命周期（秒）
+minimum_monitor_seconds = 60
+quiet_stop_seconds = 90
+maximum_monitor_seconds = 600
+offline_grace_seconds = 8
+teleport_grace_seconds = 3
+
+# 不同举报人数对应的自动踢出分数门槛。
+# 举报人数越多门槛越低，但仍要求至少两种检测规则和一项强证据。
+kick_score_thresholds = [15, 14, 13, 12]
+
+# 每秒持续水平移动速度阈值（方块/秒）。
+# 四档分别对应 1人、2人、3-4人、5人及以上不同举报者。
+speed_thresholds = [16.5, 15.5, 14.5, 13.5]
+speed_extreme_multiplier = 1.65
+speed_windows_required = [3, 3, 3, 2]
+
+# 悬浮检测时长（秒）
+hover_seconds = [4.0, 3.6, 3.2, 2.8]
+hover_vertical_tolerance = 0.55
+
+# 近战双方位置距离阈值（格）
+reach_soft_thresholds = [5.8, 5.6, 5.3, 5.0]
+reach_hard_thresholds = [7.2, 6.9, 6.6, 6.3]
+reach_soft_hits_required = 4
+reach_hard_hits_required = 2
+
+# 战斗异常窗口
+combat_window_seconds = 2.0
+combat_hits_required = [8, 8, 7, 6]
+combat_targets_required = [3, 3, 3, 2]
+
+# 破坏行为仅作为辅助证据，不单独导致踢出
+rapid_break_window_seconds = 2.0
+rapid_break_count = [22, 20, 18, 16]
+
+# 同一玩家对同一目标重复举报的冷却时间（秒）
+reporter_target_cooldown_seconds = 600
+
+# 插件会观察 PacketReceiveEvent 的包 ID 和每秒数量。
+# 未配置并验证 26.60 对应数据包 ID 前，不会仅凭包频率踢出。
+packet_telemetry = true
+
+
+# 高频左键行为：只记录为弱证据，不作为单独处罚依据。
+autoclick_window_seconds = 2.5
+autoclick_clicks_required = 52
+autoclick_max_interval_cv = 0.12
+
+# 自动搭路行为：要求连续放置、位置分散且玩家同时移动；仅作弱证据。
+scaffold_window_seconds = 3.5
+scaffold_placements_required = 7
+scaffold_min_travel = 3.5
+scaffold_max_vertical_spread = 1.25
+
+# 云端 UUID 永久封禁共享（默认关闭）。云端永远只接收 UUID，不上传玩家名或证据内容。
+# 生产环境必须填写 HTTPS 地址。仅 localhost 测试允许使用 HTTP。
+cloud_enabled = false
+cloud_endpoint = "https://your-domain.example"
+# 只读令牌：用于登录检查与下载共享 UUID 名单。
+cloud_read_token = ""
+# 写入令牌：用于管理员确认永久封禁后上传 UUID、以及执行撤销。只给可信的管理服务器。
+cloud_write_token = ""
+cloud_sync_interval_seconds = 60
+cloud_timeout_seconds = 4
+
+
+# 隐藏玩家画像（只在 Endstone 插件端保存，玩家客户端不可读取）。
+# player_profiles.json 仅保存 UUID、数值和规则计数，不保存玩家名或 XUID。
+trust_enabled = true
+trust_initial_score = 50.0
+trust_recovery_per_hour = 0.25
+trust_recovery_delay_seconds = 3600
+risk_decay_per_hour = 0.20
+risk_decay_delay_seconds = 3600
+profile_save_interval_seconds = 60
+profile_limit = 10000
+
+# 自动踢出额外要求持久化风险分达到该门槛；不满足时只生成待复核记录并通知管理员。
+auto_kick_risk_threshold = 22.0
+
+# 高延迟与服务器自定义行走速度补偿。延迟只放宽检测窗口，不会单独增加风险分。
+ping_speed_threshold_start = 150
+ping_speed_threshold_scale = 0.00045
+ping_speed_window_bonus = 1
+reach_ping_allowance_scale = 0.0010
+reach_ping_allowance_max = 0.90

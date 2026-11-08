@@ -1,0 +1,47 @@
+Metadata-Version: 2.4
+Name: endstone-zp-report-anticheat
+Version: 0.6.0
+Summary: ZP-AC隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核增强插件
+Author: ZP Server Tools
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+
+# ZP-AC Endstone 增强插件 0.6.0
+
+适用环境：Endstone 0.11.15、Minecraft Bedrock 1.26.60、Python 3.11+。
+
+本插件与唯一的 ZP-AC 行为包配套。行为包仍可独立工作；安装本插件后增加 Endstone 原生事件监测、UUID 持久化隐藏可信画像、风险评分、延迟感知移动/近战阈值、证据归档、待复核、可选自动踢出和管理员确认 UUID 永久封禁。
+
+## 新增功能
+
+- 隐藏可信分与风险分：初始可信分为 50（中性），风险分为 0；两项均只在服务端插件数据目录内保存。
+- `player_profiles.json` 使用 UUID 作为键，只保存分数、规则计数与时间，不保存玩家名或 XUID。
+- 清洁活跃时间达到恢复延迟后，可信分缓慢回升，风险分缓慢衰减；离线时间不会被当作正常游戏时长。
+- 高延迟会对移动/近战异常阈值提供有限容差；自定义 `walk_speed` 会适当修正移动阈值。
+- 自动踢出除原有多规则/强证据条件外，还要求持久风险分达到 `auto_kick_risk_threshold`。达不到时只加入待复核候选并通知管理员。
+- 新增管理员命令：`/zpac trust <在线玩家名|UUID>`、`/zpac top [数量]`。
+
+## 管理员命令
+
+- `/zpac trust <在线玩家名|UUID>`：查看隐藏可信分、风险分及证据数量。
+- `/zpac top [数量]`：查看风险分最高的画像 UUID（最多 10 条）。
+- `/zpac candidates`：查看严重行为待复核候选。
+- `/zpac confirmban <UUID>`：人工确认后加入本地永久 UUID 封禁表。
+- `/zpac pardon <UUID>`：撤销封禁并清除该 UUID 的内部风险画像（恢复到中性起点）。
+- `/zpac cloud <on|off|status|sync>`：可选云端 UUID 封禁同步，默认关闭。
+
+## 数据文件
+
+- `player_profiles.json`：仅 UUID 与数值/规则统计；不包含玩家名/XUID。
+- `evidence.jsonl`：本地审计证据，可包含目标名称和 UUID，供管理员调查。
+- `ban_review_candidates.json`：本地待复核候选，可能包含名称与证据详情。
+- `permanent_ban_uuids.json`：人工确认的永久封禁 UUID。
+
+云端只接收/返回 UUID 封禁名单，不上传可信分、风险分、名称或证据内容。
+
+## 重要说明
+
+可信分不是作弊概率，也不会单独判定或封禁玩家。所有单项检测仍是证据线索；自动踢出还需要多项规则、强证据及持久风险分同时满足。永久封禁始终需要管理员人工确认。
+
+本构建已进行 Python 编译、数据结构/持久化静态测试和 wheel 内容检查；尚未在真实 Endstone 0.11.15 + Bedrock 1.26.60.6 服务器内进行多人客户端实测。

@@ -1,0 +1,2 @@
+[endstone]
+zp-report-anticheat = endstone_zp_anticheat:ZPReportAntiCheat
