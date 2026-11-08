@@ -109,7 +109,9 @@ function isPluginOnline() {
 
 function admins() {
   try {
-    return world.getPlayers().filter((p) => p.hasTag(CONFIG.ADMIN_TAG));
+    return world.getPlayers().filter((p) =>
+      p.hasTag(CONFIG.ADMIN_TAG) || p.hasTag("zp:ac_admin")
+    );
   } catch {
     return [];
   }
@@ -200,7 +202,12 @@ function isFlightExempt(player) {
 
 function isExempt(player) {
   try {
-    if (player.hasTag(CONFIG.ADMIN_TAG) || player.hasTag(CONFIG.BYPASS_TAG)) return true;
+    if (
+      player.hasTag(CONFIG.ADMIN_TAG) ||
+      player.hasTag("zp:ac_admin") ||
+      player.hasTag(CONFIG.BYPASS_TAG) ||
+      player.hasTag("zp:ac_bypass")
+    ) return true;
   } catch { /* tag APIs may be unavailable during early join */ }
   try {
     const mode = player.getGameMode();
