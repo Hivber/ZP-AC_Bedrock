@@ -983,7 +983,8 @@ function showAdminHistory(player) {
   }).catch((error) => console.warn("[ZP-AC] 历史记录界面失败: " + error));
 }
 
-\nsystem.beforeEvents.startup.subscribe(event => {
+
+system.beforeEvents.startup.subscribe(event => {
     event.customCommandRegistry.registerCommand({
         name: REPORT_UI_CONFIG.command,
         description: "打开玩家举报系统",
