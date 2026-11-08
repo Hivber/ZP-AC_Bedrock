@@ -475,11 +475,12 @@ function trackHit(event) {
     }
   }
 
-  const recent = session.hitEvents;
-  const recentPlayers = recent.filter((hit) => hit.isPlayer);
+  const recentPlayers = session.hitEvents.filter(
+    (hit) => hit.isPlayer && now - hit.at <= CONFIG.AURA_WINDOW_MS
+  );
   const targetIds = new Set(recentPlayers.map((hit) => hit.targetId));
-  if (recentPlayers.length >= CONFIG.AURA_HIT_COUNT && targetIds.size >= CONFIG.AURA_TARGET_COUNT) {
-    flag(session, attacker, "multi_target", "中", "短时间多目标连续命中", `约 ${CONFIG.AURA_WINDOW_MS / 1000} 秒内检测到多目标命中模式，最近窗口命中玩家 ${recentPlayers.length} 次，涉及 ${targetIds.size} 名不同玩家；团战环境可能产生相似行为。`, false);
+  if (recentPlayers.length >= CONFIG.HIT_RATE_COUNT && targetIds.size >= CONFIG.AURA_TARGET_COUNT) {
+    flag(session, attacker, "multi_target", "中", "短时间多目标连续命中", `约 ${CONFIG.AURA_WINDOW_MS / 1000} 秒内检测到多目标命中模式，命中玩家 ${recentPlayers.length} 次，涉及 ${targetIds.size} 名不同玩家；团战环境可能产生相似行为。`, false);
   }
 }
 
