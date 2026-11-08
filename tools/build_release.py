@@ -30,6 +30,16 @@ def main() -> int:
     if missing:
         raise SystemExit("Missing release input(s): " + ", ".join(missing))
 
+    # compileall in CI must not leak __pycache__ files into the distributable wheel.
+    for cache_dir in ROOT.rglob("__pycache__"):
+        if cache_dir.is_dir():
+            shutil.rmtree(cache_dir, ignore_errors=True)
+    for bytecode in ROOT.rglob("*.pyc"):
+        try:
+            bytecode.unlink()
+        except FileNotFoundError:
+            pass
+
     subprocess.run(
         [sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST)],
         cwd=ROOT,
