@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "endstone-zp-report-anticheat"
+version = "0.6.1"
+description = "ZP-AC Endstone enhancement plugin for Minecraft Bedrock 1.26.60"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "ZP Server Tools" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Operating System :: OS Independent",
+]
+
+[project.entry-points."endstone"]
+zp-report-anticheat = "endstone_zp_anticheat:ZPReportAntiCheat"
+
+[tool.setuptools]
+package-dir = {"" = "plugins"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["plugins"]
+include = ["endstone_zp_anticheat*"]
+
+[tool.setuptools.package-data]
+endstone_zp_anticheat = ["config.toml"]
