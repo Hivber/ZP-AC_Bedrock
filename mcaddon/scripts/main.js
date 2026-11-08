@@ -12,7 +12,7 @@ import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/serve
 
 /*
  * ZP-AC Bedrock Core | Minecraft Bedrock 1.26.60
- * @minecraft/server 2.10.0
+ * Behavior Pack 2.1.2 | @minecraft/server 2.10.0
  *
  * Design:
  * - Standalone mode: this behavior pack continuously monitors online players,
@@ -29,12 +29,16 @@ const CONFIG = Object.freeze({
   REPORT_EVENT: "zp:report_submitted",
   PLUGIN_READY_EVENT: "zp:ac_plugin_ready",
   PLUGIN_EVIDENCE_EVENT: "zp:ac_bp_evidence",
+  ADMIN_REQUEST_EVENT: "zp:ac_admin_request",
+  ADMIN_RESPONSE_EVENT: "zp:ac_admin_response",
+  ADMIN_PROTOCOL: "zp-ac-admin-v1",
+  OP_ADMIN_TAG: "zp_ac_op_admin",
   PROTOCOL: "zp-ac-bp-v1",
 
   SAMPLE_INTERVAL: 5,
   DISCONNECT_GRACE_TICKS: 20 * 8,
   ALERT_COOLDOWN_TICKS: 20 * 30,
-  PLUGIN_LEASE_TICKS: 20 * 25,
+  PLUGIN_LEASE_TICKS: 20 * 90,
 
   HISTORY_KEY: "zp_ac_history_v2",
   HISTORY_LIMIT: 80,
@@ -570,6 +574,11 @@ function parseReportMessage(raw) {
 }
 
 function handleScriptEvent(event) {
+  if (event.id === CONFIG.ADMIN_RESPONSE_EVENT) {
+    handleAdminResponse(event);
+    return;
+  }
+
   if (event.id === CONFIG.PLUGIN_READY_EVENT) {
     if (event.sourceType !== ScriptEventSource.Server) return;
     if (String(event.message || "").trim() === CONFIG.PROTOCOL) {
@@ -673,7 +682,7 @@ console.warn("[ZP-AC] Bedrock 独立基础反作弊已启动：全员移动/战�
  */
 
 const REPORT_UI_CONFIG = {
-    command: "playerreport:ba",
+    command: "zp_ac:ba",
     title: "§l§6玩家举报系统",
     successMessage: "§a举报已提交；独立基础反作弊持续运行，若安装增强插件则同步证据。",
     maxReasonLength: 200
@@ -806,7 +815,9 @@ function openReportMenu(player) {
 
 /* ===== ZP-AC administrator panel: native Bedrock server forms ===== */
 const ADMIN_UI_COMMAND = "zp_ac:admin";
-const ADMIN_TAGS_UI = ["zp_ac_admin", "zp:ac_admin"];
+const ADMIN_TAGS_UI = ["zp_ac_admin", "zp:ac_admin", CONFIG.OP_ADMIN_TAG];
+const adminRequests = new Map();
+let adminRequestSequence = 0;
 
 function isUiAdmin(player) {
   try {
@@ -841,7 +852,7 @@ function showAdminPanel(player) {
     .button("§l系统状态")
     .button("§l在线玩家监控")
     .button("§l最近检测记录")
-    .button("§l插件管理命令帮助")
+    .button("§l增强插件管理")
     .button("§c关闭");
 
   form.show(player).then((response) => {
@@ -857,11 +868,7 @@ function showAdminPanel(player) {
         showAdminHistory(player);
         break;
       case 3:
-        uiAdminMessage(player,
-          "插件管理命令：/zpac top、/zpac candidates、/zpac trust <玩家名或UUID>、" +
-          "/zpac confirmban <UUID>、/zpac pardon <UUID>、/zpac cloud status。\n" +
-          "永久封禁必须人工确认；可信分和风险分只在服务端管理端显示。"
-        );
+        showPluginAdminPanel(player);
         break;
       default:
         break;
@@ -876,7 +883,7 @@ function showAdminStatus(player) {
   if (!isUiAdmin(player)) return;
   const body =
     "§l§f运行状态\n" +
-    "§f行为包版本：§e2.1.0\n" +
+    "§f行为包版本：§e2.1.2\n" +
     "§f插件桥接：§" + (isPluginOnline() ? "a已连接" : "e未连接/独立运行") + "\n" +
     "§f在线玩家：§e" + world.getPlayers().length + "\n" +
     "§f活跃监控会话：§e" + sessions.size + "\n" +
@@ -984,33 +991,335 @@ function showAdminHistory(player) {
 }
 
 
-system.beforeEvents.startup.subscribe(event => {
-    event.customCommandRegistry.registerCommand({
-        name: REPORT_UI_CONFIG.command,
-        description: "打开玩家举报系统",
-        permissionLevel: CommandPermissionLevel.Any,
-        cheatsRequired: false
-    }, origin => {
-        const player = origin.initiator ?? origin.sourceEntity;
-        if (!(player instanceof Player)) {
-            return { status: CustomCommandStatus.Failure, message: "此指令只能由玩家执行。" };
-        }
-        system.run(() => openReportMenu(player));
-        return { status: CustomCommandStatus.Success };
-    });
+/* ===== Endstone management bridge: native, on-demand admin forms ===== */
+function requestPluginAdmin(player, action, values = {}, callback = () => {}) {
+  if (!isUiAdmin(player)) {
+    uiAdminMessage(player, "没有管理权限。");
+    return;
+  }
+  if (!isPluginOnline()) {
+    uiAdminMessage(player, "Endstone 增强插件当前未连接；行为包基础检测仍然运行。");
+    return;
+  }
+  const requestId = `${Date.now()}-${++adminRequestSequence}`;
+  const payload = {
+    version: CONFIG.ADMIN_PROTOCOL,
+    requestId,
+    adminName: cleanText(player.name, 64),
+    action,
+    ...values
+  };
+  adminRequests.set(requestId, {
+    adminName: cleanText(player.name, 64).toLocaleLowerCase(),
+    callback
+  });
+  if (!runServerEvent(CONFIG.ADMIN_REQUEST_EVENT, JSON.stringify(payload))) {
+    adminRequests.delete(requestId);
+    uiAdminMessage(player, "管理请求发送失败，请稍后重试。");
+    return;
+  }
+  system.runTimeout(() => {
+    if (!adminRequests.has(requestId)) return;
+    adminRequests.delete(requestId);
+    const stillOnline = world.getPlayers().some(
+      (p) => p.name.toLocaleLowerCase() === cleanText(player.name, 64).toLocaleLowerCase()
+    );
+    if (stillOnline) uiAdminMessage(player, "管理请求超时；请检查增强插件和 ScriptEvent 通信。");
+  }, 20 * 12);
+}
 
-    event.customCommandRegistry.registerCommand({
-        name: ADMIN_UI_COMMAND,
-        description: "打开 ZP-AC 管理员控制台",
-        permissionLevel: CommandPermissionLevel.GameDirectors,
-        cheatsRequired: false
-    }, origin => {
+function handleAdminResponse(event) {
+  if (event.sourceType !== ScriptEventSource.Server) return;
+  let response;
+  try {
+    const raw = String(event.message || "");
+    response = JSON.parse(raw.startsWith("b64:")
+      ? decodeBase64Utf8(raw.slice(4))
+      : decodeURIComponent(raw));
+  } catch (error) {
+    console.warn("[ZP-AC] 管理响应解析失败: " + error);
+    return;
+  }
+  if (!response || response.version !== CONFIG.ADMIN_PROTOCOL) return;
+  const requestId = String(response.requestId || "");
+  const pending = adminRequests.get(requestId);
+  if (!pending) return;
+  if (String(response.adminName || "").toLocaleLowerCase() !== pending.adminName) return;
+  adminRequests.delete(requestId);
+  const player = world.getPlayers().find(
+    (p) => p.name.toLocaleLowerCase() === pending.adminName
+  );
+  if (!player || !isUiAdmin(player)) return;
+  try {
+    pending.callback(player, response);
+  } catch (error) {
+    console.warn("[ZP-AC] 管理界面回调失败: " + error);
+    uiAdminMessage(player, "管理界面处理响应时发生错误。");
+  }
+}
+
+function showPluginAdminPanel(player) {
+  requestPluginAdmin(player, "overview", {}, (admin, response) => {
+    if (!response.ok) {
+      uiAdminMessage(admin, response.error || "无法读取插件状态。");
+      return;
+    }
+    const data = response.data || {};
+    const form = new ActionFormData()
+      .title("§l§cZP-AC 增强插件管理")
+      .body(
+        "§f插件版本：§e" + cleanText(data.plugin_version || "未知", 24) + "\n" +
+        "§f监控会话：§e" + Number(data.active_sessions || 0) + "\n" +
+        "§f待复核候选：§e" + Number(data.candidate_count || 0) + "\n" +
+        "§f本地永久封禁 UUID：§e" + Number(data.local_ban_count || 0) + "\n" +
+        "§f隐藏画像数量：§e" + Number(data.profile_count || 0) + "\n" +
+        "§f云端同步：§" + (data.cloud_enabled ? "a已启用" : "7已关闭") + "\n\n" +
+        "§8风险分与可信分不会向普通玩家公开。"
+      )
+      .button("§l待复核候选")
+      .button("§l查看隐藏可信画像")
+      .button("§l本地封禁名单 / 撤销封禁")
+      .button("§l云端 UUID 同步")
+      .button("§c返回控制台");
+    form.show(admin).then((result) => {
+      if (result.canceled) return;
+      switch (result.selection) {
+        case 0: showPluginCandidates(admin); break;
+        case 1: showPluginTrustPrompt(admin); break;
+        case 2: showPluginBanList(admin); break;
+        case 3: showPluginCloudPanel(admin); break;
+        case 4: showAdminPanel(admin); break;
+      }
+    }).catch((error) => {
+      console.warn("[ZP-AC] 增强插件管理界面失败: " + error);
+      uiAdminMessage(admin, "无法打开增强插件管理界面。");
+    });
+  });
+}
+
+function showPluginCandidates(player) {
+  requestPluginAdmin(player, "candidate_list", {}, (admin, response) => {
+    if (!response.ok) {
+      uiAdminMessage(admin, response.error || "读取候选列表失败。");
+      return;
+    }
+    const candidates = Array.isArray(response.data?.candidates) ? response.data.candidates : [];
+    if (!candidates.length) {
+      uiAdminMessage(admin, "当前没有达到严重行为门槛的待复核候选。");
+      showPluginAdminPanel(admin);
+      return;
+    }
+    const form = new ActionFormData()
+      .title("§l待复核严重行为")
+      .body("§7选择候选查看依据。永久封禁仍必须再次确认。");
+    for (const candidate of candidates) {
+      const name = cleanText(candidate.player_name || "未知玩家", 24);
+      const rules = Array.isArray(candidate.rules) ? candidate.rules.slice(0, 3).join(",") : "";
+      form.button(name + "\n§c嫌疑分 " + Number(candidate.score || 0) +
+        " §7| §f" + cleanText(rules, 48));
+    }
+    form.button("§c返回");
+    form.show(admin).then((result) => {
+      if (result.canceled || result.selection === undefined) return;
+      if (result.selection >= candidates.length) {
+        showPluginAdminPanel(admin);
+        return;
+      }
+      const candidate = candidates[result.selection];
+      const uuid = String(candidate.uuid || "");
+      new MessageFormData()
+        .title("§l候选复核")
+        .body(
+          "§f玩家：§e" + cleanText(candidate.player_name || "未知", 32) + "\n" +
+          "§fUUID：§7" + uuid + "\n" +
+          "§f会话嫌疑分：§c" + Number(candidate.score || 0) + "\n" +
+          "§f独立举报者：§e" + Number(candidate.reporter_count || 0) + "\n" +
+          "§f规则：§e" + cleanText((candidate.rules || []).join("、"), 160) + "\n\n" +
+          "§c确认后将写入本地永久 UUID 封禁名单，并踢出在线目标。"
+        )
+        .button1("确认永久封禁")
+        .button2("取消")
+        .show(admin)
+        .then((confirm) => {
+          if (confirm.canceled || confirm.selection !== 0) return;
+          requestPluginAdmin(admin, "confirmban", { uuid }, (currentAdmin, resultResponse) => {
+            uiAdminMessage(currentAdmin, resultResponse.ok
+              ? "已完成管理员确认并写入永久 UUID 封禁名单。"
+              : (resultResponse.error || "封禁确认失败。"));
+            showPluginAdminPanel(currentAdmin);
+          });
+        });
+    }).catch((error) => {
+      console.warn("[ZP-AC] 候选列表界面失败: " + error);
+      uiAdminMessage(admin, "无法显示候选列表。");
+    });
+  });
+}
+
+function showPluginTrustPrompt(player) {
+  const form = new ModalFormData()
+    .title("§l查询隐藏玩家画像")
+    .textField("输入在线玩家名或 UUID", "玩家名 / UUID", { defaultValue: "" })
+    .submitButton("查询画像");
+  form.show(player).then((result) => {
+    if (result.canceled) return;
+    const value = String(result.formValues?.[0] || "").trim();
+    if (!value) {
+      uiAdminMessage(player, "请输入玩家名或 UUID。");
+      return;
+    }
+    requestPluginAdmin(player, "trust", { value }, (admin, response) => {
+      if (!response.ok) {
+        uiAdminMessage(admin, response.error || "画像查询失败。");
+        return;
+      }
+      const profile = response.data || {};
+      new MessageFormData()
+        .title("§l隐藏玩家画像")
+        .body(
+          "§fUUID：§7" + cleanText(profile.uuid || "", 64) + "\n" +
+          "§f隐藏可信分：§a" + Number(profile.trust ?? 50).toFixed(1) + "/100\n" +
+          "§f风险分：§c" + Number(profile.risk ?? 0).toFixed(1) + "/100\n" +
+          "§f累计证据：§e" + Number(profile.flags || 0) + "\n" +
+          "§f强证据：§e" + Number(profile.strong_flags || 0) + "\n" +
+          "§f累计活跃监控：§e" + Math.floor(Number(profile.active_seconds || 0) / 60) + " 分钟\n" +
+          "§f最近规则：§e" + cleanText(profile.last_rule || "无", 48) + "\n\n" +
+          "§7分数只供管理员复核，不代表作弊概率。"
+        )
+        .button1("返回")
+        .button2("关闭")
+        .show(admin)
+        .then((next) => {
+          if (!next.canceled && next.selection === 0) showPluginAdminPanel(admin);
+        });
+    });
+  }).catch((error) => {
+    console.warn("[ZP-AC] 画像查询表单失败: " + error);
+    uiAdminMessage(player, "无法打开画像查询表单。");
+  });
+}
+
+function showPluginBanList(player) {
+  requestPluginAdmin(player, "bans", {}, (admin, response) => {
+    if (!response.ok) {
+      uiAdminMessage(admin, response.error || "读取封禁名单失败。");
+      return;
+    }
+    const uuids = Array.isArray(response.data?.uuids) ? response.data.uuids : [];
+    if (!uuids.length) {
+      uiAdminMessage(admin, "本地永久封禁名单为空。");
+      showPluginAdminPanel(admin);
+      return;
+    }
+    const form = new ActionFormData()
+      .title("§l本地永久封禁 UUID")
+      .body("§7选择 UUID 后可发起撤销操作。");
+    for (const uuid of uuids) form.button(String(uuid));
+    form.button("§c返回");
+    form.show(admin).then((result) => {
+      if (result.canceled || result.selection === undefined) return;
+      if (result.selection >= uuids.length) {
+        showPluginAdminPanel(admin);
+        return;
+      }
+      const uuid = String(uuids[result.selection]);
+      new MessageFormData()
+        .title("§l撤销 UUID 封禁")
+        .body("确定撤销该 UUID 的本地封禁，并将撤销状态加入同步队列吗？\n\n§7" + uuid)
+        .button1("确认撤销")
+        .button2("取消")
+        .show(admin)
+        .then((confirm) => {
+          if (confirm.canceled || confirm.selection !== 0) return;
+          requestPluginAdmin(admin, "pardon", { uuid }, (currentAdmin, resultResponse) => {
+            uiAdminMessage(currentAdmin, resultResponse.ok
+              ? "已撤销该 UUID 的封禁，并重置内部画像。"
+              : (resultResponse.error || "撤销封禁失败。"));
+            showPluginAdminPanel(currentAdmin);
+          });
+        });
+    });
+  });
+}
+
+function showPluginCloudPanel(player) {
+  requestPluginAdmin(player, "cloud_status", {}, (admin, response) => {
+    if (!response.ok) {
+      uiAdminMessage(admin, response.error || "读取云端状态失败。");
+      return;
+    }
+    const data = response.data || {};
+    const enabled = Boolean(data.enabled);
+    const form = new ActionFormData()
+      .title("§l云端 UUID 封禁同步")
+      .body(
+        "§f状态：§" + (enabled ? "a已启用" : "7已关闭") + "\n" +
+        "§f读取令牌：§e" + (data.read_token_configured ? "已配置" : "未配置") + "\n" +
+        "§f写入令牌：§e" + (data.write_token_configured ? "已配置" : "未配置") + "\n" +
+        "§f本地 UUID：§e" + Number(data.local_ban_count || 0) + "\n" +
+        "§f云端缓存 UUID：§e" + Number(data.cloud_ban_count || 0) + "\n" +
+        (data.problem ? "§c配置问题：" + cleanText(data.problem, 180) : "§7云端只同步 UUID，不上传玩家名称或证据。")
+      )
+      .button(enabled ? "§c关闭云端同步" : "§a启用云端同步")
+      .button("立即同步")
+      .button("返回");
+    form.show(admin).then((result) => {
+      if (result.canceled || result.selection === undefined) return;
+      if (result.selection === 2) {
+        showPluginAdminPanel(admin);
+        return;
+      }
+      const action = result.selection === 0 ? (enabled ? "cloud_off" : "cloud_on") : "cloud_sync";
+      requestPluginAdmin(admin, action, {}, (currentAdmin, resultResponse) => {
+        uiAdminMessage(currentAdmin, resultResponse.ok
+          ? (resultResponse.data?.message || "云端操作已提交。")
+          : (resultResponse.error || "云端操作失败。"));
+        showPluginCloudPanel(currentAdmin);
+      });
+    });
+  });
+}
+
+
+system.beforeEvents.startup.subscribe((event) => {
+  const registrations = [
+    {
+      name: REPORT_UI_CONFIG.command,
+      description: "打开玩家举报系统",
+      permissionLevel: CommandPermissionLevel.Any,
+      cheatsRequired: false
+    },
+    {
+      name: ADMIN_UI_COMMAND,
+      description: "打开 ZP-AC 管理员控制台",
+      permissionLevel: CommandPermissionLevel.Any,
+      cheatsRequired: false
+    }
+  ];
+
+  const handlers = {
+    [REPORT_UI_CONFIG.command]: (player) => openReportMenu(player),
+    [ADMIN_UI_COMMAND]: (player) => showAdminPanel(player)
+  };
+
+  for (const definition of registrations) {
+    try {
+      event.customCommandRegistry.registerCommand(definition, (origin) => {
         const player = origin.initiator ?? origin.sourceEntity;
         if (!(player instanceof Player)) {
-            return { status: CustomCommandStatus.Failure, message: "此指令只能由玩家执行。" };
+          return {
+            status: CustomCommandStatus.Failure,
+            message: "此指令只能由玩家执行。"
+          };
         }
-        system.run(() => showAdminPanel(player));
+        system.run(() => handlers[definition.name](player));
         return { status: CustomCommandStatus.Success };
-    });
-    console.warn("[PlayerReport] 举报 UI 已加载；独立基础检测不依赖 Endstone，插件仅提供增强功能。");
+      });
+      console.warn("[ZP-AC] 自定义命令注册成功: /" + definition.name);
+    } catch (error) {
+      console.error("[ZP-AC] 自定义命令注册失败: /" + definition.name + "；" + error);
+    }
+  }
+
+  console.warn("[ZP-AC] 启动完成；命令命名空间统一为 zp_ac；举报与管理员 UI 分别受各自权限校验。");
 });
