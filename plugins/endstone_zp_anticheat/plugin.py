@@ -545,11 +545,9 @@ class ZPReportAntiCheat(Plugin):
         profile["flags"] = int(profile.get("flags", 0)) + 1
         profile["last_flag_at"] = time.time()
         profile["last_rule"] = code
+        # 只标记脏数据；由 _pulse 按 profile_save_interval_seconds 批量落盘。
+        # 避免每条检测证据都触发同步磁盘 IO。
         self._profiles_dirty = True
-        try:
-            self._save_profiles()
-        except Exception as exc:
-            self.logger.warning(f"保存隐藏玩家画像失败：{type(exc).__name__}")
         return profile
 
     def _update_profile_activity(self, player_uuid: str, now_epoch: float) -> None:
