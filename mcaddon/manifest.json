@@ -23,7 +23,7 @@
       "version": [
         2,
         1,
-        0
+        1
       ],
       "entry": "scripts/main.js"
     }
