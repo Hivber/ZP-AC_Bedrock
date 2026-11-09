@@ -63,7 +63,7 @@ jobs:
           assert all(value is True for value in checks.values())
           assert "反作弊检测功能开关" in script
           assert '.toggle(rows[0][1], { defaultValue: isCheckEnabled("speed") })' in script
-          assert not re.search(r"\\.toggle\\(rows\\[\\d+\\]\\[1\\], isCheckEnabled", script)
+          assert not re.search(r"\.toggle\(rows\[\d+\]\[1\], isCheckEnabled", script)
           assert 'action == "set_checks"' in plugin
           assert "zp:ac_checks_sync" in script and "zp:ac_checks_sync" in plugin
           print("ZP-AC manifest, version, protocol and detection-toggle checks passed.")
