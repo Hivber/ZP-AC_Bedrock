@@ -1739,7 +1739,7 @@ class ZPReportAntiCheat(Plugin):
             if _player_key(online_attacker) != attacker_key or _player_key(online_victim) != victim_key:
                 return
             attacker, victim = online_attacker, online_victim
-            if bool(self.cfg.get("public_credit_enabled", True)) and not self._is_exempt(attacker):
+            if bool(self.cfg.get("public_credit_enabled", True)):
                 attacker_profile = self._profile_for_uuid(attacker_key)
                 credit = clamp_public_credit(attacker_profile.get("public_credit", PUBLIC_CREDIT_DEFAULT))
                 threshold = float(self.cfg.get("public_credit_lock_threshold", PUBLIC_CREDIT_LOCK_THRESHOLD))
