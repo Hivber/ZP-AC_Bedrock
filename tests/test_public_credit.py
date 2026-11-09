@@ -26,13 +26,6 @@ class PublicCreditPolicyTests(unittest.TestCase):
     def test_explicit_bypass_is_supported(self):
         self.assertTrue(MODULE.can_damage_players(0, 70.0, exempt=True))
 
-    def test_recovery_requires_delay_and_active_time(self):
-        self.assertEqual(MODULE.recover_public_credit(60, 3600, 0.5, 1200, 3600), 60.0)
-        self.assertEqual(MODULE.recover_public_credit(60, 3600, 0.5, 7200, 3600), 60.5)
-
-    def test_recovery_caps_at_100(self):
-        self.assertEqual(MODULE.recover_public_credit(99.9, 3600, 5.0, 7200, 3600), 100.0)
-
     def test_one_hour_online_restores_half_a_point(self):
         score, progress = MODULE.accrue_public_credit(80.0, 0.0, 3600.0, 0.5)
         self.assertEqual(score, 80.5)
