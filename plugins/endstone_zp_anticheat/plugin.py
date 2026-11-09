@@ -167,7 +167,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.9"
+    version = "0.6.10"
     commands = {
         "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
