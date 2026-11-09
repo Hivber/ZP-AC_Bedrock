@@ -3,7 +3,7 @@
 behavior_pack_bridge_enabled = true
 
 # 管理员 UI 检测开关；首次安装默认全部启用。
-anti_cheat_checks = { speed = true, flight = true, reach = true, combat = true, autoclick = true, scaffold = true, fast_break = true }
+anti_cheat_checks = { speed = true, flight = true, reach = true, combat = true, autoclick = true, scaffold = true, fast_break = true, xray = true }
 
 # ZP 举报联动反作弊配置
 # 自动踢出只由多项独立行为证据触发；举报数量本身不会触发踢出。
@@ -97,3 +97,13 @@ ping_speed_threshold_scale = 0.00045
 ping_speed_window_bonus = 1
 reach_ping_allowance_scale = 0.0010
 reach_ping_allowance_max = 0.90
+
+
+# 矿物透视行为分析：仅 Endstone 增强层。低权重证据，不单独触发处罚。
+xray_window_seconds = 180.0
+xray_min_rock_blocks = 40
+xray_min_ore_blocks = 5
+xray_min_rare_ores = 2
+xray_min_clusters = 3
+xray_min_ore_ratio = 0.08
+xray_cluster_distance = 5.5
