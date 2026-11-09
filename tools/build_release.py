@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 ADDON_DIR = ROOT / "mcaddon"
-ADDON_OUTPUT = DIST / "ZP-AC-2.1.7.mcaddon"
+ADDON_OUTPUT = DIST / "ZP-AC-2.1.8.mcaddon"
 WHEEL_PATTERN = "endstone_zp_report_anticheat-0.7.0-*.whl"
 
 
