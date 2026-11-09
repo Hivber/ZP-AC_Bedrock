@@ -49,6 +49,8 @@ BP_ADMIN_REQUEST_ID = "zp:ac_admin_request"
 BP_ADMIN_RESPONSE_ID = "zp:ac_admin_response"
 BP_ADMIN_PROTOCOL = "zp-ac-admin-v1"
 BP_CHECKS_SYNC_ID = "zp:ac_checks_sync"
+PUBLIC_CREDIT_REQUEST_ID = "zp:public_credit_request"
+PUBLIC_CREDIT_REQUEST_VERSION = "zp-public-credit-v1"
 BP_CHECKS_PROTOCOL = "zp-ac-checks-v1"
 BP_OP_ADMIN_TAG = "zp_ac_op_admin"
 BP_PROTOCOL = "zp-ac-bp-v1"
@@ -165,7 +167,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.9"
+    version = "0.6.10"
     commands = {
         "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
@@ -1193,6 +1195,32 @@ class ZPReportAntiCheat(Plugin):
         except Exception as exc:
             self.logger.warning(f"行为包检测配置同步失败：{_clean(str(exc), 160)}")
 
+    def _on_public_credit_request(self, event: ScriptMessageEvent) -> None:
+        """Serve a self-only public credit request from the behavior-pack /ba menu."""
+        sender = getattr(event, "sender", None)
+        if not isinstance(sender, ConsoleCommandSender) and _clean(getattr(sender, "name", ""), 32).lower() not in {"server", "console"}:
+            return
+        try:
+            payload = json.loads(unquote(event.message or ""))
+            if not isinstance(payload, dict) or payload.get("version") != PUBLIC_CREDIT_REQUEST_VERSION:
+                return
+            player_name = _clean(payload.get("playerName"), 64)
+            if not player_name:
+                return
+            player = self._find_online_player(player_name)
+            if player is None:
+                return
+            player_uuid = _player_key(player)
+            if not player_uuid:
+                player.send_message("§c无法读取你的玩家 UUID，暂时无法查询信用分。")
+                return
+            profile = self._profile_for_uuid(player_uuid)
+            score = clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT))
+            # Deliberately return only the public score to the requesting player.
+            player.send_message(f"§8[§bZP信用§8] §f公开信用分：§e{score:.1f}/100")
+        except Exception as exc:
+            self.logger.warning(f"综合菜单公开信用分查询失败：{_clean(str(exc), 120)}")
+
     def _on_behavior_pack_admin_request(self, event: ScriptMessageEvent) -> None:
         if not bool(self.cfg.get("behavior_pack_bridge_enabled", True)):
             return
@@ -1468,6 +1496,9 @@ class ZPReportAntiCheat(Plugin):
         message_id = getattr(event, "message_id", "")
         if message_id == BP_CHECKS_SYNC_ID:
             self._on_behavior_pack_checks_sync(event)
+            return
+        if message_id == PUBLIC_CREDIT_REQUEST_ID:
+            self._on_public_credit_request(event)
             return
         if message_id == BP_ADMIN_REQUEST_ID:
             self._on_behavior_pack_admin_request(event)

@@ -804,7 +804,7 @@ console.warn("[ZP-AC] Bedrock 独立基础反作弊已启动：全员移动/战�
 
 const REPORT_UI_CONFIG = {
     command: "zp_ac:ba",
-    title: "§l§6玩家举报系统",
+    title: "§l§6ZP 综合菜单",
     successMessage: "§a举报已提交；独立基础反作弊持续运行，若安装增强插件则同步证据。",
     maxReasonLength: 200
 };
@@ -865,6 +865,47 @@ function submitReportToEndstone(reporter, target, reason, reportId) {
     if (result && result.successCount === 0) {
         throw new Error("scriptevent 命令未成功执行");
     }
+}
+
+const PUBLIC_CREDIT_REQUEST_EVENT = "zp:public_credit_request";
+
+function requestOwnPublicCredit(player) {
+    if (!isPluginOnline()) {
+        sendMessage(player, "§c信用分服务暂不可用，请稍后再试。");
+        return;
+    }
+    try {
+        const payload = JSON.stringify({
+            version: "zp-public-credit-v1",
+            playerName: cleanText(player.name, 64)
+        });
+        const encoded = encodeURIComponent(payload);
+        const result = world.getDimension("overworld").runCommand(
+            `scriptevent ${PUBLIC_CREDIT_REQUEST_EVENT} ${encoded}`
+        );
+        if (result && result.successCount === 0) {
+            sendMessage(player, "§c信用分查询请求发送失败，请稍后重试。");
+        }
+    } catch (error) {
+        console.warn("[ZP-AC] 公开信用分查询请求失败: " + error);
+        sendMessage(player, "§c信用分查询暂时不可用。");
+    }
+}
+
+function showPlayerHub(player) {
+    const form = new ActionFormData()
+        .title("§l§6ZP 综合菜单")
+        .body("§7选择你要使用的功能")
+        .button("§l§a查看我的信用分")
+        .button("§l§c举报其他玩家");
+    form.show(player).then((response) => {
+        if (response.canceled || response.selection === undefined) return;
+        if (response.selection === 0) requestOwnPublicCredit(player);
+        else if (response.selection === 1) openReportMenu(player);
+    }).catch((error) => {
+        console.warn("[ZP-AC] 综合菜单打开失败: " + error);
+        sendMessage(player, "§c综合菜单暂时无法打开，请稍后重试。");
+    });
 }
 
 function openReportMenu(player) {
@@ -1475,7 +1516,7 @@ system.beforeEvents.startup.subscribe((event) => {
   const registrations = [
     {
       name: REPORT_UI_CONFIG.command,
-      description: "打开玩家举报系统",
+      description: "打开 ZP 综合菜单",
       permissionLevel: CommandPermissionLevel.Any,
       cheatsRequired: false
     },
@@ -1488,7 +1529,7 @@ system.beforeEvents.startup.subscribe((event) => {
   ];
 
   const handlers = {
-    [REPORT_UI_CONFIG.command]: (player) => openReportMenu(player),
+    [REPORT_UI_CONFIG.command]: (player) => showPlayerHub(player),
     [ADMIN_UI_COMMAND]: (player) => showAdminPanel(player)
   };
 
