@@ -935,7 +935,7 @@ class ZPReportAntiCheat(Plugin):
             threshold = float(self.cfg.get("public_credit_lock_threshold", PUBLIC_CREDIT_LOCK_THRESHOLD))
             status = f"§c低于 {threshold:.0f} 分：暂时无法攻击其他玩家。" if score < threshold else "§a正常：可以参与玩家间战斗。"
             sender.send_message(
-                f"§8[§bZP 信用系统§8] §f你的公开信用分：§e{score:.1f}/100\\n"
+                f"§8[§bZP 信用系统§8] §f你的公开信用分：§e{score:.1f}/100\n"
                 f"§7长期正常在线游戏可逐步恢复；严重违规或确认的作弊行为会降低分数。\\n{status}"
             )
             return True
