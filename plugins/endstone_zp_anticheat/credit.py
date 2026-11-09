@@ -25,26 +25,6 @@ def can_damage_players(score: object, threshold: object = PUBLIC_CREDIT_LOCK_THR
     return clamp_public_credit(score) >= limit
 
 
-def recover_public_credit(
-    score: object,
-    active_seconds: object,
-    points_per_hour: object,
-    seconds_since_penalty: object,
-    recovery_delay_seconds: object,
-) -> float:
-    current = clamp_public_credit(score)
-    try:
-        active = max(0.0, float(active_seconds))
-        rate = max(0.0, float(points_per_hour))
-        elapsed = max(0.0, float(seconds_since_penalty))
-        delay = max(0.0, float(recovery_delay_seconds))
-    except (TypeError, ValueError, OverflowError):
-        return current
-    if elapsed < delay or active <= 0.0 or rate <= 0.0:
-        return current
-    return min(100.0, current + active * rate / 3600.0)
-
-
 def is_retaliation_allowed(last_hit_at: object, now: object, window_seconds: object = 5.0) -> bool:
     """Return true only when this player was hit by the same opponent within the grace window."""
     try:
