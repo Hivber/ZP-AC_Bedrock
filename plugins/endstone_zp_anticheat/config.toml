@@ -90,6 +90,8 @@ profile_limit = 10000
 
 # 自动踢出额外要求持久化风险分达到该门槛；不满足时只生成待复核记录并通知管理员。
 auto_kick_risk_threshold = 22.0
+# 自动踢出至少需要两个不同的高置信度检测规则；弱辅助线索不能凑数。
+auto_kick_min_strong_rules = 2
 
 # 高延迟与服务器自定义行走速度补偿。延迟只放宽检测窗口，不会单独增加风险分。
 ping_speed_threshold_start = 150
