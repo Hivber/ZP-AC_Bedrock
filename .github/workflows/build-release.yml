@@ -57,12 +57,20 @@ jobs:
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
-          assert manifest["header"]["version"] == [2, 1, 7]
-          assert manifest["modules"][0]["version"] == [2, 1, 7]
+          assert manifest["header"]["version"] == [2, 1, 8]
+          assert manifest["modules"][0]["version"] == [2, 1, 8]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.6.9"
-          assert 'version = "0.6.9"' in plugin
+          assert project["project"]["version"] == "0.6.10"
+          assert 'version = "0.6.10"' in plugin
           assert 'command: "zp_ac:ba"' in script
+          assert "function showPlayerHub(player)" in script
+          assert '.button("§l§a查看我的信用分")' in script
+          assert '.button("§l§c举报其他玩家")' in script
+          assert "requestOwnPublicCredit(player)" in script
+          assert '[REPORT_UI_CONFIG.command]: (player) => showPlayerHub(player)' in script
+          assert "zp:public_credit_request" in script and "zp:public_credit_request" in plugin
+          assert "def _on_public_credit_request(" in plugin
+          assert "PUBLIC_CREDIT_REQUEST_VERSION" in plugin
           assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
           assert "playerreport:ba" not in script
           assert "zp:ac_admin_request" in script and "zp:ac_admin_response" in script
@@ -133,7 +141,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v4
         with:
-          name: ZP-AC-2.1.7-and-Endstone-0.6.9
+          name: ZP-AC-2.1.8-and-Endstone-0.6.10
           path: |
             dist/*.mcaddon
             dist/*.whl
