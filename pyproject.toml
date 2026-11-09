@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "endstone-zp-report-anticheat"
-version = "0.6.6"
+version = "0.6.7"
 description = "ZP-AC Endstone enhancement plugin for Minecraft Bedrock 1.26.60"
 readme = "README.md"
 requires-python = ">=3.11"
