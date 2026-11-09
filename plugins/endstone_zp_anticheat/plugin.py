@@ -28,6 +28,7 @@ from endstone.event import (
     PlayerLoginEvent,
     PlayerMoveEvent,
     PlayerQuitEvent,
+    PlayerRespawnEvent,
     PlayerTeleportEvent,
     ScriptMessageEvent,
     event_handler,
@@ -447,7 +448,7 @@ class ZPReportAntiCheat(Plugin):
             "evidence": [],
             "last_position": loc,
             "last_dimension": self._dimension_key(target),
-            "teleport_until": now + 1.0,
+            "teleport_until": now + max(3.0, float(self.cfg.get("spawn_grace_seconds", 5.0))),
             "move_window_start": now,
             "move_window_distance": 0.0,
             "speed_windows": 0,
@@ -1600,6 +1601,29 @@ class ZPReportAntiCheat(Plugin):
         pos = _xyz(event.to_location) or _xyz(getattr(player, "location", None)) or (0.0, 0.0, 0.0)
         self._reset_motion(session, pos, self._dimension_key(player), now)
         session["teleport_until"] = now + float(self.cfg.get("teleport_grace_seconds", 3))
+
+    @event_handler
+    def on_player_respawn(self, event: PlayerRespawnEvent) -> None:
+        """Reset movement/scaffold windows after death; respawn is not player movement."""
+        player = event.player
+        session = self.sessions.get(_player_key(player) or "")
+        if session is None:
+            return
+        now = time.monotonic()
+        pos = _xyz(getattr(player, "location", None)) or session.get("last_position") or (0.0, 0.0, 0.0)
+        self._reset_motion(session, pos, self._dimension_key(player), now)
+        session["teleport_until"] = now + max(3.0, float(self.cfg.get("spawn_grace_seconds", 5.0)))
+        for key in ("scaffold_events", "reach_soft", "reach_hard", "combat_hits"):
+            collection = session.get(key)
+            if collection is not None:
+                collection.clear()
+        session["auto_kick_deferred_independent_domains"] = False
+        self._log(
+            "movement_baseline_reset",
+            target_uuid=session.get("target_uuid"),
+            reason="player_respawn",
+            grace_seconds=max(3.0, float(self.cfg.get("spawn_grace_seconds", 5.0))),
+        )
 
     @event_handler
     def on_dimension_change(self, event: PlayerDimensionChangeEvent) -> None:
