@@ -2531,6 +2531,13 @@ class ZPReportAntiCheat(Plugin):
         except Exception:
             pass
         key = _player_key(event.player)
+        if key:
+            # Start a fresh online-time baseline on every join. Time spent offline
+            # (including server downtime) must never count toward credit recovery.
+            profile = self._profile_for_uuid(key)
+            if profile is not None:
+                profile["last_seen_at"] = time.time()
+                self._profiles_dirty = True
         if key and key in self.sessions:
             self.sessions[key]["offline_since"] = None
             self.sessions[key]["teleport_until"] = time.monotonic() + max(3.0, float(self.cfg.get("spawn_grace_seconds", 5.0)))
