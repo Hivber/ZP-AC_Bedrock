@@ -242,8 +242,21 @@ function sendEvidenceToPlugin(payload) {
   return runServerEvent(CONFIG.PLUGIN_EVIDENCE_EVENT, message);
 }
 
+function getEffectAmplifier(player, effectId) {
+  try {
+    const effect = player.getEffect(effectId);
+    if (effect === undefined || effect === null) return -1;
+    const amplifier = Number(effect.amplifier);
+    return Number.isFinite(amplifier) ? Math.max(0, Math.min(10, Math.floor(amplifier))) : null;
+  } catch {
+    return null;
+  }
+}
+
 function hasEffect(player, effectId) {
-  try { return player.getEffect(effectId) !== undefined; } catch { return false; }
+  const amplifier = getEffectAmplifier(player, effectId);
+  // 状态 API 读取失败时按豁免处理，避免因 API 异常误报飞行。
+  return amplifier === null || amplifier >= 0;
 }
 
 function isFlightExempt(player) {
@@ -445,8 +458,9 @@ function sampleMovement(player, session) {
     session.movementGraceUntil = tickCounter + 20 * 3;
   } else {
     if (isCheckEnabled("speed")) {
-      const speedBoost = hasEffect(player, "speed");
-      const speedLimit = speedBoost ? CONFIG.SPEED_WITH_POTION : CONFIG.SPEED_NORMAL;
+      const speedAmplifier = getEffectAmplifier(player, "speed");
+      const potionFactor = speedAmplifier === null ? null : (speedAmplifier < 0 ? 1 : 1 + 0.2 * (speedAmplifier + 1));
+      const speedLimit = potionFactor === null ? Number.POSITIVE_INFINITY : CONFIG.SPEED_NORMAL * potionFactor;
       const exemptMove = isFlightExempt(player) || player.isInWater || player.isClimbing;
       if (!exemptMove && horizontalSpeed > speedLimit && fullDistance > 1.0) {
         session.speedStrikes += 1;
@@ -483,7 +497,7 @@ function sampleMovement(player, session) {
         session.hoverTravel = 0;
       }
 
-      if (!flightExempt && onGround === false && !player.isInWater && !player.isClimbing && dy > 0.16) {
+      if (!flightExempt && !hasEffect(player, "jump_boost") && onGround === false && !player.isInWater && !player.isClimbing && dy > 0.16) {
         session.ascendTicks += elapsedTicks;
         if (session.ascendTicks >= CONFIG.ASCEND_TICKS) {
           flag(session, player, "ascending", "中", "持续异常上升线索", `连续约 ${(session.ascendTicks / 20).toFixed(1)} 秒保持明显向上位移；跳跃、弹射物、击退和特殊地图机制仍需排除。`, false);
