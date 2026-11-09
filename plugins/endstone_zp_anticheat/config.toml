@@ -2,6 +2,9 @@
 # true：插件通过 ScriptEvent 心跳识别行为包，并接收行为证据用于增强评分/处罚。
 behavior_pack_bridge_enabled = true
 
+# 管理员 UI 检测开关；首次安装默认全部启用。
+anti_cheat_checks = { speed = true, flight = true, reach = true, combat = true, autoclick = true, scaffold = true, fast_break = true }
+
 # ZP 举报联动反作弊配置
 # 自动踢出只由多项独立行为证据触发；举报数量本身不会触发踢出。
 
