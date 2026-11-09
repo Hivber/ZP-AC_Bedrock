@@ -1486,6 +1486,13 @@ class ZPReportAntiCheat(Plugin):
             self._reset_motion(session, destination, dim, now)
             return
 
+        if not self._check_enabled("speed"):
+            session["move_window_start"] = now
+            session["move_window_distance"] = 0.0
+            session["speed_windows"] = 0
+            session["last_position"] = destination
+            return
+
         delta = _horizontal_distance(origin, destination)
         vertical = abs(destination[1] - origin[1])
         # 大位移不视为 Speed：可能是传送、回弹、服务器修正或其他插件。
@@ -1590,6 +1597,10 @@ class ZPReportAntiCheat(Plugin):
 
     @event_handler
     def on_actor_damage(self, event: ActorDamageEvent) -> None:
+        reach_enabled = self._check_enabled("reach")
+        combat_enabled = self._check_enabled("combat")
+        if not reach_enabled and not combat_enabled:
+            return
         try:
             source = event.damage_source
             if bool(source.is_indirect):
@@ -1626,10 +1637,11 @@ class ZPReportAntiCheat(Plugin):
             soft += latency_allowance
             hard += latency_allowance
 
-            session["combat_hits"].append((now, victim_key, _player_name(victim), distance))
-            self._prune_deque(session["combat_hits"], now - 5.0)
+            if combat_enabled:
+                session["combat_hits"].append((now, victim_key, _player_name(victim), distance))
+                self._prune_deque(session["combat_hits"], now - 5.0)
 
-            if distance >= hard:
+            if reach_enabled and distance >= hard:
                 session["reach_hard"].append((now, distance, victim_key))
                 self._prune_deque(session["reach_hard"], now - 6.0)
                 if len(session["reach_hard"]) >= int(self.cfg.get("reach_hard_hits_required", 2)):
@@ -1643,7 +1655,7 @@ class ZPReportAntiCheat(Plugin):
                         high_confidence=max_distance >= hard * 1.12,
                     )
                     session["reach_hard"].clear()
-            elif distance >= soft:
+            elif reach_enabled and distance >= soft:
                 session["reach_soft"].append((now, distance, victim_key))
                 self._prune_deque(session["reach_soft"], now - 5.0)
                 if len(session["reach_soft"]) >= int(self.cfg.get("reach_soft_hits_required", 4)):
@@ -1658,20 +1670,23 @@ class ZPReportAntiCheat(Plugin):
                     )
                     session["reach_soft"].clear()
 
-            window = float(self.cfg.get("combat_window_seconds", 2.0))
-            recent = [hit for hit in session["combat_hits"] if now - hit[0] <= window]
-            distinct_targets = {hit[1] for hit in recent}
-            hits_required = int(self._tier_value("combat_hits_required", tier, [8, 8, 7, 6]))
-            targets_required = int(self._tier_value("combat_targets_required", tier, [3, 3, 3, 2]))
-            if len(recent) >= hits_required and len(distinct_targets) >= targets_required:
-                names = sorted({hit[2] for hit in recent if hit[2]})
-                self._flag(
-                    attacker,
-                    session,
-                    "multi_target_combat",
-                    f"约 {window:.1f} 秒内记录到 {len(recent)} 次直接近战伤害，涉及 {len(distinct_targets)} 名玩家（{', '.join(names[:5])}）。",
-                    high_confidence=True,
-                )
+            if combat_enabled:
+                window = float(self.cfg.get("combat_window_seconds", 2.0))
+                recent = [hit for hit in session["combat_hits"] if now - hit[0] <= window]
+                distinct_targets = {hit[1] for hit in recent}
+                hits_required = int(self._tier_value("combat_hits_required", tier, [8, 8, 7, 6]))
+                targets_required = int(self._tier_value("combat_targets_required", tier, [3, 3, 3, 2]))
+                if len(recent) >= hits_required and len(distinct_targets) >= targets_required:
+                    names = sorted({hit[2] for hit in recent if hit[2]})
+                    self._flag(
+                        attacker,
+                        session,
+                        "multi_target_combat",
+                        f"约 {window:.1f} 秒内记录到 {len(recent)} 次直接近战伤害，涉及 {len(distinct_targets)} 名玩家（{', '.join(names[:5])}）。",
+                        high_confidence=True,
+                    )
+                    session["combat_hits"].clear()
+            else:
                 session["combat_hits"].clear()
         except Exception as exc:
             self.logger.warning(f"处理攻击事件失败: {exc}")
@@ -1686,7 +1701,7 @@ class ZPReportAntiCheat(Plugin):
         player = event.player
         key = _player_key(player)
         session = self.sessions.get(key or "")
-        if session is None or session["kicked"] or self._is_exempt(player):
+        if session is None or session["kicked"] or self._is_exempt(player) or not self._check_enabled("fast_break"):
             return
         now = time.monotonic()
         events = self.break_events[key]
@@ -1714,7 +1729,7 @@ class ZPReportAntiCheat(Plugin):
         player = event.player
         key = _player_key(player)
         session = self.sessions.get(key or "")
-        if session is None or session["kicked"] or self._is_exempt(player):
+        if session is None or session["kicked"] or self._is_exempt(player) or not self._check_enabled("autoclick"):
             return
         try:
             action = str(getattr(event.action, "name", event.action)).upper()
@@ -1758,7 +1773,7 @@ class ZPReportAntiCheat(Plugin):
         player = event.player
         key = _player_key(player)
         session = self.sessions.get(key or "")
-        if session is None or session["kicked"] or self._is_exempt(player):
+        if session is None or session["kicked"] or self._is_exempt(player) or not self._check_enabled("scaffold"):
             return
         try:
             state = event.block_placed_state
@@ -1832,6 +1847,9 @@ class ZPReportAntiCheat(Plugin):
     # ----------------------------- evidence, scoring, kick -----------------------------
 
     def _flag(self, player: Any, session: dict[str, Any], code: str, detail: str, high_confidence: bool) -> None:
+        check_key = RULE_CHECK_GROUP.get(code)
+        if check_key and not self._check_enabled(check_key):
+            return
         now = time.monotonic()
         last = session["rule_last_at"].get(code, 0.0)
         if now - last < 12.0:
@@ -2023,6 +2041,11 @@ class ZPReportAntiCheat(Plugin):
                 self._end_session(key, session, "clean")
 
     def _sample_air_state(self, player: Any, session: dict[str, Any], now: float) -> None:
+        if not self._check_enabled("flight"):
+            session["air_since"] = None
+            session["air_start_y"] = None
+            session["air_start_xz"] = None
+            return
         if self._is_exempt(player) or now < session["teleport_until"]:
             session["air_since"] = None
             return
