@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 ADDON_DIR = ROOT / "mcaddon"
 ADDON_OUTPUT = DIST / "ZP-AC-2.1.7.mcaddon"
-WHEEL_PATTERN = "endstone_zp_report_anticheat-0.6.7-*.whl"
+WHEEL_PATTERN = "endstone_zp_report_anticheat-0.6.8-*.whl"
 
 
 def main() -> int:
@@ -24,6 +24,7 @@ def main() -> int:
         ADDON_DIR / "scripts" / "main.js",
         ROOT / "plugins" / "endstone_zp_anticheat" / "plugin.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "policy.py",
+        ROOT / "plugins" / "endstone_zp_anticheat" / "credit.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "movement.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "config.toml",
         ROOT / "plugins" / "endstone_zp_anticheat" / "ai" / "engine.py",
@@ -55,7 +56,7 @@ def main() -> int:
 
     wheels = sorted(DIST.glob(WHEEL_PATTERN))
     if len(wheels) != 1:
-        raise SystemExit(f"Expected exactly one 0.6.7 wheel, found {len(wheels)}")
+        raise SystemExit(f"Expected exactly one 0.6.8 wheel, found {len(wheels)}")
 
     print(f"Created: {ADDON_OUTPUT.relative_to(ROOT)}")
     print(f"Created: {wheels[0].relative_to(ROOT)}")
