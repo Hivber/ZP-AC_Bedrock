@@ -87,6 +87,7 @@ jobs:
           assert "can_damage_players" in credit
           assert "accrue_public_credit" in credit
           assert "is_retaliation_allowed" in credit
+          assert "should_count_pvp_hit" in credit
           assert 'command.name == "zp"' in plugin
           assert "public_credit_lock_threshold" in plugin
           assert "repeated_one_sided_pvp" in plugin
@@ -99,6 +100,9 @@ jobs:
           assert "public_credit_retaliation_seconds" in config
           assert "test_recovery_progress_survives_restart" in Path("tests/test_public_credit.py").read_text(encoding="utf-8")
           assert "test_retaliation_only_applies_to_same_attacker_within_five_seconds" in Path("tests/test_public_credit.py").read_text(encoding="utf-8")
+          assert "test_retaliation_does_not_count_as_harassment_or_deduct_credit" in Path("tests/test_public_credit.py").read_text(encoding="utf-8")
+          assert "test_player_command_exposes_only_public_credit" in Path("tests/test_public_credit.py").read_text(encoding="utf-8")
+          assert "test_admin_query_is_guarded" in Path("tests/test_public_credit.py").read_text(encoding="utf-8")
           assert "def analyze(" in ai_engine
           assert "def read_effect_amplifier(" in movement
           assert "def speed_effect_multiplier(" in movement
