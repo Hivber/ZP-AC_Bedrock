@@ -94,7 +94,6 @@ profile_limit = 10000
 public_credit_enabled = true
 public_credit_initial_score = 100.0
 public_credit_recovery_per_hour = 0.5
-public_credit_recovery_delay_seconds = 0
 public_credit_retaliation_seconds = 5.0
 # 严格按“低于 70 分”限制 PvP；70 分本身仍可攻击玩家。
 public_credit_lock_threshold = 70.0
