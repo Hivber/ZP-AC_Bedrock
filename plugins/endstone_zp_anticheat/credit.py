@@ -45,6 +45,39 @@ def recover_public_credit(
     return min(100.0, current + active * rate / 3600.0)
 
 
+def is_retaliation_allowed(last_hit_at: object, now: object, window_seconds: object = 5.0) -> bool:
+    """Return true only when this player was hit by the same opponent within the grace window."""
+    try:
+        last_hit = float(last_hit_at)
+        current = float(now)
+        window = max(0.0, float(window_seconds))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return last_hit > 0.0 and 0.0 <= current - last_hit <= window
+
+
+def accrue_public_credit(
+    score: object,
+    recovery_progress_seconds: object,
+    online_delta_seconds: object,
+    points_per_hour: object = 0.5,
+) -> tuple[float, float]:
+    """Accrue recovery from active online time; progress is a persisted sub-hour remainder."""
+    current = clamp_public_credit(score)
+    try:
+        progress = max(0.0, min(3599.99, float(recovery_progress_seconds)))
+        delta = max(0.0, float(online_delta_seconds))
+        rate = max(0.0, float(points_per_hour))
+    except (TypeError, ValueError, OverflowError):
+        return current, 0.0
+    progress += delta
+    completed_hours = int(progress // 3600.0)
+    if completed_hours:
+        current = min(100.0, current + completed_hours * rate)
+        progress -= completed_hours * 3600.0
+    return current, min(3599.99, progress)
+
+
 def apply_public_credit_penalty(score: object, penalty: object) -> float:
     try:
         amount = max(0.0, float(penalty))
