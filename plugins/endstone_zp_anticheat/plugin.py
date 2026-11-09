@@ -1729,6 +1729,15 @@ class ZPReportAntiCheat(Plugin):
             victim_key = _player_key(victim)
             if not attacker_key or not victim_key or attacker_key == victim_key:
                 return
+            # Resolve both actors against the online player list so mobs and other
+            # non-player actors can never be blocked by the PvP credit gate.
+            online_attacker = self._find_online_player(_player_name(attacker))
+            online_victim = self._find_online_player(_player_name(victim))
+            if online_attacker is None or online_victim is None:
+                return
+            if _player_key(online_attacker) != attacker_key or _player_key(online_victim) != victim_key:
+                return
+            attacker, victim = online_attacker, online_victim
             if bool(self.cfg.get("public_credit_enabled", True)) and not self._is_exempt(attacker):
                 attacker_profile = self._profile_for_uuid(attacker_key)
                 credit = clamp_public_credit(attacker_profile.get("public_credit", PUBLIC_CREDIT_DEFAULT))
