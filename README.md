@@ -3,14 +3,14 @@
 ZP-AC 是一套面向 Minecraft Bedrock 1.26.60 的反作弊系统，采用**一个行为包 + 一个 Endstone 增强插件**的交付结构。
 
 - 行为包：2.1.5。无插件时独立运行，负责基础行为采样、本地历史记录、举报 UI、管理员面板和可配置检测开关。
-- Endstone 增强插件：0.6.3。提供服务端原生事件检测、UUID 持久化画像、风险关联、待复核候选、可选自动踢出、人工确认永久封禁和可选云端 UUID 同步。
+- Endstone 增强插件：0.6.4。提供服务端原生事件检测、UUID 持久化画像、风险关联、待复核候选、可选自动踢出、人工确认永久封禁和可选云端 UUID 同步。
 - 云端功能默认关闭；云端仅同步 UUID，不上传玩家名称、XUID、可信分、风险分或证据正文。
 
 ## 部署
 
 1. 将构建产物 `ZP-AC-2.1.5.mcaddon` 导入 Minecraft/Bedrock 服务端，并在目标世界启用行为包。
-2. 将 `endstone_zp_report_anticheat-0.6.3-py3-none-any.whl` 安装到 Endstone 0.11.15 / Python 3.11 环境。
-3. 重启服务器，确认日志中出现 ZP-AC 0.6.2 启用信息和行为包握手信息。
+2. 将 `endstone_zp_report_anticheat-0.6.4-py3-none-any.whl` 安装到 Endstone 0.11.15 / Python 3.11 环境。
+3. 重启服务器，确认日志中出现 ZP-AC 0.6.4 启用信息和行为包握手信息。
 
 兼容基线：Minecraft Bedrock 1.26.60.6、Protocol 2225、Endstone 0.11.15、Python 3.11、`@minecraft/server` 2.10.0、`@minecraft/server-ui` 2.2.0。
 
@@ -68,3 +68,12 @@ python tools/build_release.py
 ## 验收边界
 
 CI 会执行 JavaScript 语法检查、Python 编译检查、清单/版本一致性检查，并生成两个发行包。CI 不模拟真实 Bedrock 客户端、Endstone 事件循环或多玩家服务器；最终验收仍需在实际 1.26.60.6 + Endstone 0.11.15 服务器中测试命令注册、举报、管理员 UI、封禁/撤销和云端连接。
+
+ 
+## 本地 AI 行为分析（Endstone 0.6.4）
+
+插件内置无第三方依赖的本地统计行为分析引擎（Local Robust Baseline v1）。它从服务端观测到的移动速度、战斗事件、矿物/岩石开采、点击间隔和方块放置行为中构建时间窗口特征，并基于每名玩家自己的历史基线识别多维异常组合。首次运行需要积累基线样本；基线在插件运行期间内存维护，重启后重新预热。
+
+AI 线索只写入本地 evidence.jsonl 并通知管理员，不增加玩家风险分、不进入自动踢出条件、不触发永久封禁。当前版本属于统计异常检测，不是预训练神经网络，也不宣称能直接识别所有作弊客户端。管理员应结合原有服务端规则证据复核。
+
+AI 默认本地运行且无需 API Key。配置中的 ai_api_enabled、ai_api_key、ai_api_endpoint 是未来外部适配器预留项；当前版本不调用外部 API、不发送玩家行为数据。即使填写 API Key，也不会启用远程分析。
