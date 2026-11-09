@@ -165,9 +165,10 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.9"
+    version = "0.7.0"
     commands = {
         "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
+        "ba": {"description": "打开 ZP 玩家综合菜单。", "usages": ["/ba"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
             "usages": [
@@ -929,6 +930,19 @@ class ZPReportAntiCheat(Plugin):
             self._start_cloud_sync("admin_enable")
 
     def on_command(self, sender: CommandSender, command: Command, args: list[str]) -> bool:
+        if command.name == "ba":
+            if isinstance(sender, ConsoleCommandSender):
+                sender.send_message("§e/ba 只能由在线玩家执行。")
+                return True
+            try:
+                # Execute the behavior-pack custom command as this player so its
+                # ActionFormData UI is opened only for the command issuer.
+                if not sender.perform_command("zp_ac:ba"):
+                    sender.send_message("§c无法打开综合菜单，请确认行为包已启用且已完成脚本加载。")
+            except Exception as exc:
+                self.logger.warning(f"Unable to open player hub for {getattr(sender, 'name', 'player')}: {exc}")
+                sender.send_message("§c综合菜单暂时不可用，请稍后重试。")
+            return True
         if command.name == "zp":
             if isinstance(sender, ConsoleCommandSender):
                 sender.send_message("§e/zp 只能由在线玩家执行。")
