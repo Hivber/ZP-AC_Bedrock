@@ -47,18 +47,24 @@ jobs:
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
-          assert manifest["header"]["version"] == [2, 1, 2]
-          assert manifest["modules"][0]["version"] == [2, 1, 2]
+          assert manifest["header"]["version"] == [2, 1, 3]
+          assert manifest["modules"][0]["version"] == [2, 1, 3]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.6.1"
-          assert 'version = "0.6.1"' in plugin
+          assert project["project"]["version"] == "0.6.2"
+          assert 'version = "0.6.2"' in plugin
           assert 'command: "zp_ac:ba"' in script
           assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
           assert "playerreport:ba" not in script
           assert "zp:ac_admin_request" in script and "zp:ac_admin_response" in script
           assert "zp:ac_admin_request" in plugin and "zp:ac_admin_response" in plugin
           assert config["behavior_pack_bridge_enabled"] is True
-          print("ZP-AC manifest, version, protocol and config checks passed.")
+          checks = config["anti_cheat_checks"]
+          assert set(checks) == {"speed", "flight", "reach", "combat", "autoclick", "scaffold", "fast_break"}
+          assert all(value is True for value in checks.values())
+          assert '"反作弊检测功能开关"' in script
+          assert 'action == "set_checks"' in plugin
+          assert "zp:ac_checks_sync" in script and "zp:ac_checks_sync" in plugin
+          print("ZP-AC manifest, version, protocol and detection-toggle checks passed.")
           PY
 
       - name: Install wheel builder
@@ -76,7 +82,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v4
         with:
-          name: ZP-AC-2.1.2-and-Endstone-0.6.1
+          name: ZP-AC-2.1.3-and-Endstone-0.6.2
           path: |
             dist/*.mcaddon
             dist/*.whl
