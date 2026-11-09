@@ -1,6 +1,23 @@
 import unittest
 
-from endstone_zp_anticheat.credit import (
+import importlib.util
+from pathlib import Path
+
+CREDIT_PATH = Path(__file__).resolve().parents[1] / "plugins" / "endstone_zp_anticheat" / "credit.py"
+SPEC = importlib.util.spec_from_file_location("zp_ac_public_credit", CREDIT_PATH)
+MODULE = importlib.util.module_from_spec(SPEC)
+assert SPEC is not None and SPEC.loader is not None
+SPEC.loader.exec_module(MODULE)
+
+PUBLIC_CREDIT_DEFAULT = MODULE.PUBLIC_CREDIT_DEFAULT
+PUBLIC_CREDIT_LOCK_THRESHOLD = MODULE.PUBLIC_CREDIT_LOCK_THRESHOLD
+can_damage_players = MODULE.can_damage_players
+clamp_public_credit = MODULE.clamp_public_credit
+recover_public_credit = MODULE.recover_public_credit
+apply_public_credit_penalty = MODULE.apply_public_credit_penalty
+
+# Avoid importing the Endstone plugin package in unit tests.
+# from endstone_zp_anticheat.credit import (
     PUBLIC_CREDIT_DEFAULT,
     PUBLIC_CREDIT_LOCK_THRESHOLD,
     can_damage_players,
