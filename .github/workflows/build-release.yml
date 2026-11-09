@@ -52,6 +52,7 @@ jobs:
           plugin = Path("plugins/endstone_zp_anticheat/plugin.py").read_text(encoding="utf-8")
           ai_engine = Path("plugins/endstone_zp_anticheat/ai/engine.py").read_text(encoding="utf-8")
           policy = Path("plugins/endstone_zp_anticheat/policy.py").read_text(encoding="utf-8")
+          movement = Path("plugins/endstone_zp_anticheat/movement.py").read_text(encoding="utf-8")
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
@@ -83,6 +84,10 @@ jobs:
           assert "auto_kick_min_strong_rules" in config
           assert "def has_independent_strong_evidence" in policy
           assert "def analyze(" in ai_engine
+          assert "def read_effect_amplifier(" in movement
+          assert "def speed_effect_multiplier(" in movement
+          assert "read_effect_amplifier" in plugin
+          assert "speed_effect_multiplier" in plugin
           assert "ai_api_enabled = false" in Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8")
           assert config["anti_cheat_checks"]["xray"] is True
           assert '.toggle(rows[0][1], { defaultValue: isCheckEnabled("speed") })' in script
