@@ -38,7 +38,7 @@ from endstone.plugin import Plugin
 from .ai.engine import LocalBehaviorAI
 from .movement import read_effect_amplifier, speed_effect_multiplier
 from .policy import has_independent_strong_evidence, profile_penalty
-from .credit import PUBLIC_CREDIT_DEFAULT, PUBLIC_CREDIT_LOCK_THRESHOLD, accrue_public_credit, can_damage_players, clamp_public_credit, is_retaliation_allowed
+from .credit import PUBLIC_CREDIT_DEFAULT, PUBLIC_CREDIT_LOCK_THRESHOLD, accrue_public_credit, can_damage_players, clamp_public_credit, is_retaliation_allowed, should_count_pvp_hit
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -1779,7 +1779,7 @@ class ZPReportAntiCheat(Plugin):
                             attacker.send_message("§c信用分过低")
                         self.pvp_message_cooldowns[attacker_key] = now_message
                     return
-                if not is_retaliation:
+                if should_count_pvp_hit(is_retaliation):
                     self._record_public_pvp_hit(attacker_key, victim_key)
                 else:
                     # Mark the exchange as reciprocal so the original attacker is
