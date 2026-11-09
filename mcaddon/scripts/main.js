@@ -12,7 +12,7 @@ import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/serve
 
 /*
  * ZP-AC Bedrock Core | Minecraft Bedrock 1.26.60
- * Behavior Pack 2.1.2 | @minecraft/server 2.10.0
+ * Behavior Pack 2.1.3 | @minecraft/server 2.10.0
  *
  * Design:
  * - Standalone mode: this behavior pack continuously monitors online players,
@@ -32,6 +32,9 @@ const CONFIG = Object.freeze({
   ADMIN_REQUEST_EVENT: "zp:ac_admin_request",
   ADMIN_RESPONSE_EVENT: "zp:ac_admin_response",
   ADMIN_PROTOCOL: "zp-ac-admin-v1",
+  CHECKS_SYNC_EVENT: "zp:ac_checks_sync",
+  CHECKS_PROTOCOL: "zp-ac-checks-v1",
+  CHECKS_KEY: "zp_ac_checks_v1",
   OP_ADMIN_TAG: "zp_ac_op_admin",
   PROTOCOL: "zp-ac-bp-v1",
 
@@ -71,11 +74,60 @@ const CONFIG = Object.freeze({
   SCAFFOLD_MAX_Y_SPREAD: 1.25
 });
 
+const DETECTION_CHECK_DEFAULTS = Object.freeze({
+  speed: true, flight: true, reach: true, combat: true,
+  autoclick: true, scaffold: true, fast_break: true
+});
+const BP_RULE_CHECK = Object.freeze({
+  large_displacement: "speed", speed: "speed",
+  hover: "flight", ascending: "flight",
+  reach_hard: "reach", reach_repeat: "reach",
+  multi_target: "combat", autoclick: "autoclick", scaffold: "scaffold"
+});
 const sessions = new Map();
 let tickCounter = 0;
 let history = [];
 let pluginLeaseUntil = 0;
 let pluginModeAnnounced = false;
+let detectionChecks = { ...DETECTION_CHECK_DEFAULTS };
+
+function normalizeDetectionChecks(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalized = {};
+  for (const key of Object.keys(DETECTION_CHECK_DEFAULTS)) {
+    normalized[key] = typeof source[key] === "boolean" ? source[key] : DETECTION_CHECK_DEFAULTS[key];
+  }
+  return normalized;
+}
+function isCheckEnabled(key) { return detectionChecks[key] !== false; }
+function loadDetectionChecks() {
+  try {
+    const raw = world.getDynamicProperty(CONFIG.CHECKS_KEY);
+    detectionChecks = typeof raw === "string" && raw.length > 0
+      ? normalizeDetectionChecks(JSON.parse(raw))
+      : { ...DETECTION_CHECK_DEFAULTS };
+  } catch (error) {
+    detectionChecks = { ...DETECTION_CHECK_DEFAULTS };
+    console.warn("[ZP-AC] 读取检测开关失败，已使用默认全启用配置: " + error);
+  }
+}
+function saveDetectionChecks(value) {
+  const normalized = normalizeDetectionChecks(value);
+  try {
+    world.setDynamicProperty(CONFIG.CHECKS_KEY, JSON.stringify(normalized));
+    detectionChecks = normalized;
+    return true;
+  } catch (error) {
+    console.warn("[ZP-AC] 保存检测开关失败: " + error);
+    return false;
+  }
+}
+function syncDetectionChecksToPlugin() {
+  if (!isPluginOnline()) return false;
+  return runServerEvent(CONFIG.CHECKS_SYNC_EVENT, JSON.stringify({
+    version: CONFIG.CHECKS_PROTOCOL, checks: detectionChecks
+  }));
+}
 
 function cleanText(value, max = 180) {
   return String(value ?? "")
@@ -304,6 +356,8 @@ function startMonitoring(player, report) {
 }
 
 function flag(session, player, code, severity, title, detail, highConfidence = false) {
+  const checkKey = BP_RULE_CHECK[code];
+  if (checkKey && !isCheckEnabled(checkKey)) return;
   const cooldown = code === "scaffold" || code === "autoclick" ? 20 * 60 : CONFIG.ALERT_COOLDOWN_TICKS;
   const last = session.lastAlertAt[code] ?? -999999;
   if (tickCounter - last < cooldown) return;
@@ -368,24 +422,29 @@ function sampleMovement(player, session) {
   const horizontalSpeed = horizontal / seconds;
 
   if (fullDistance >= CONFIG.TELEPORT_DELTA) {
-    flag(session, player, "large_displacement", "信息", "检测到大幅位移", `采样间隔 ${elapsedTicks} tick，位移 ${fullDistance.toFixed(1)} 格；传送、击退、区块/网络异常均可能造成此现象，仅记录不计入处罚。`);
+    if (isCheckEnabled("speed")) {
+      flag(session, player, "large_displacement", "信息", "检测到大幅位移", `采样间隔 ${elapsedTicks} tick，位移 ${fullDistance.toFixed(1)} 格；传送、击退、区块/网络异常均可能造成此现象，仅记录不计入处罚。`);
+    }
     session.speedStrikes = 0;
     session.hoverTicks = 0;
     session.hoverTravel = 0;
     session.ascendTicks = 0;
   } else {
-    const speedBoost = hasEffect(player, "speed");
-    const speedLimit = speedBoost ? CONFIG.SPEED_WITH_POTION : CONFIG.SPEED_NORMAL;
-    const exemptMove = isFlightExempt(player) || player.isInWater || player.isClimbing;
-
-    if (!exemptMove && horizontalSpeed > speedLimit && fullDistance > 1.0) {
-      session.speedStrikes += 1;
-      if (session.speedStrikes >= CONFIG.SPEED_REQUIRED_SAMPLES) {
-        flag(session, player, "speed", "高", "持续高速移动异常", `连续 ${session.speedStrikes} 次采样超过保守阈值；当前约 ${horizontalSpeed.toFixed(1)} 格/秒，阈值 ${speedLimit.toFixed(1)} 格/秒。`, true);
-        session.speedStrikes = 0;
+    if (isCheckEnabled("speed")) {
+      const speedBoost = hasEffect(player, "speed");
+      const speedLimit = speedBoost ? CONFIG.SPEED_WITH_POTION : CONFIG.SPEED_NORMAL;
+      const exemptMove = isFlightExempt(player) || player.isInWater || player.isClimbing;
+      if (!exemptMove && horizontalSpeed > speedLimit && fullDistance > 1.0) {
+        session.speedStrikes += 1;
+        if (session.speedStrikes >= CONFIG.SPEED_REQUIRED_SAMPLES) {
+          flag(session, player, "speed", "高", "持续高速移动异常", `连续 ${session.speedStrikes} 次采样超过保守阈值；当前约 ${horizontalSpeed.toFixed(1)} 格/秒，阈值 ${speedLimit.toFixed(1)} 格/秒。`, true);
+          session.speedStrikes = 0;
+        }
+      } else {
+        session.speedStrikes = Math.max(0, session.speedStrikes - 1);
       }
     } else {
-      session.speedStrikes = Math.max(0, session.speedStrikes - 1);
+      session.speedStrikes = 0;
     }
 
     let onGround = true;
@@ -395,27 +454,33 @@ function sampleMovement(player, session) {
       falling = player.isFalling;
     } catch { /* unavailable state: skip air checks */ }
 
-    const flightExempt = isFlightExempt(player) || player.isInWater || player.isClimbing;
-    if (!flightExempt && onGround === false && falling === false && Math.abs(dy) < 0.045) {
-      session.hoverTicks += elapsedTicks;
-      session.hoverTravel += horizontal;
-      if (session.hoverTicks >= CONFIG.HOVER_TICKS && session.hoverTravel >= 0.9) {
-        flag(session, player, "hover", "高", "疑似持续空中悬浮", `离地约 ${(session.hoverTicks / 20).toFixed(1)} 秒，垂直位移近乎为零，水平移动 ${session.hoverTravel.toFixed(1)} 格；已排除常见飞行/药水/水中状态。`, true);
+    if (isCheckEnabled("flight")) {
+      const flightExempt = isFlightExempt(player) || player.isInWater || player.isClimbing;
+      if (!flightExempt && onGround === false && falling === false && Math.abs(dy) < 0.045) {
+        session.hoverTicks += elapsedTicks;
+        session.hoverTravel += horizontal;
+        if (session.hoverTicks >= CONFIG.HOVER_TICKS && session.hoverTravel >= 0.9) {
+          flag(session, player, "hover", "高", "疑似持续空中悬浮", `离地约 ${(session.hoverTicks / 20).toFixed(1)} 秒，垂直位移近乎为零，水平移动 ${session.hoverTravel.toFixed(1)} 格；已排除常见飞行/药水/水中状态。`, true);
+          session.hoverTicks = 0;
+          session.hoverTravel = 0;
+        }
+      } else {
         session.hoverTicks = 0;
         session.hoverTravel = 0;
+      }
+
+      if (!flightExempt && onGround === false && !player.isInWater && !player.isClimbing && dy > 0.16) {
+        session.ascendTicks += elapsedTicks;
+        if (session.ascendTicks >= CONFIG.ASCEND_TICKS) {
+          flag(session, player, "ascending", "中", "持续异常上升线索", `连续约 ${(session.ascendTicks / 20).toFixed(1)} 秒保持明显向上位移；跳跃、弹射物、击退和特殊地图机制仍需排除。`, false);
+          session.ascendTicks = 0;
+        }
+      } else {
+        session.ascendTicks = 0;
       }
     } else {
       session.hoverTicks = 0;
       session.hoverTravel = 0;
-    }
-
-    if (!flightExempt && onGround === false && !player.isInWater && !player.isClimbing && dy > 0.16) {
-      session.ascendTicks += elapsedTicks;
-      if (session.ascendTicks >= CONFIG.ASCEND_TICKS) {
-        flag(session, player, "ascending", "中", "持续异常上升线索", `连续约 ${(session.ascendTicks / 20).toFixed(1)} 秒保持明显向上位移；跳跃、弹射物、击退和特殊地图机制仍需排除。`, false);
-        session.ascendTicks = 0;
-      }
-    } else {
       session.ascendTicks = 0;
     }
   }
@@ -426,7 +491,7 @@ function sampleMovement(player, session) {
 
 function trackSwing(event) {
   const player = event.player;
-  if (!player || player.typeId !== "minecraft:player") return;
+  if (!player || player.typeId !== "minecraft:player" || !isCheckEnabled("autoclick")) return;
   if (event.swingSource !== EntitySwingSource.Attack) return;
   const session = getSession(player);
   if (!session) return;
@@ -454,50 +519,61 @@ function trackSwing(event) {
 function trackHit(event) {
   const attacker = event.damagingEntity;
   if (!attacker || attacker.typeId !== "minecraft:player") return;
+  const reachEnabled = isCheckEnabled("reach");
+  const combatEnabled = isCheckEnabled("combat");
+  if (!reachEnabled && !combatEnabled) return;
   const session = getSession(attacker);
   if (!session) return;
 
   const target = event.hitEntity;
   const isPlayerTarget = target?.typeId === "minecraft:player";
   let reach;
-  try { reach = distance3(attacker.location, target.location); } catch { reach = undefined; }
+  if (reachEnabled) {
+    try { reach = distance3(attacker.location, target.location); } catch { reach = undefined; }
+  }
   const now = nowMs();
 
-  session.hitEvents.push({
-    at: now,
-    targetId: target?.id || "unknown",
-    targetName: isPlayerTarget ? cleanText(target.name, 64) : cleanText(target?.typeId || "entity", 64),
-    isPlayer: isPlayerTarget,
-    reach
-  });
-  session.hitEvents = session.hitEvents.filter((hit) => now - hit.at <= CONFIG.HIT_WINDOW_MS);
+  if (combatEnabled) {
+    session.hitEvents.push({
+      at: now, targetId: target?.id || "unknown",
+      targetName: isPlayerTarget ? cleanText(target.name, 64) : cleanText(target?.typeId || "entity", 64),
+      isPlayer: isPlayerTarget, reach
+    });
+    session.hitEvents = session.hitEvents.filter((item) => now - item.at <= CONFIG.HIT_WINDOW_MS);
+  }
 
-  if (typeof reach === "number" && isPlayerTarget) {
+  if (reachEnabled && typeof reach === "number" && isPlayerTarget) {
     if (reach >= CONFIG.REACH_HARD) {
       flag(session, attacker, "reach_hard", "中", "疑似超距近战命中", `命中玩家 ${cleanText(target.name, 64)} 时双方位置距离约 ${reach.toFixed(2)} 格；该值是实体位置距离近似，不是精确碰撞箱/视线距离。`, false);
     } else if (reach >= CONFIG.REACH_SOFT) {
       session.reachSuspects.push({ at: now, reach, target: cleanText(target.name, 64) });
-      session.reachSuspects = session.reachSuspects.filter((hit) => now - hit.at <= 5000);
+      session.reachSuspects = session.reachSuspects.filter((item) => now - item.at <= 5000);
       if (session.reachSuspects.length >= CONFIG.REACH_SOFT_COUNT) {
-        const maxReach = Math.max(...session.reachSuspects.map((hit) => hit.reach));
+        const maxReach = Math.max(...session.reachSuspects.map((item) => item.reach));
         flag(session, attacker, "reach_repeat", "中", "重复出现远距离近战命中线索", `${session.reachSuspects.length} 次命中距离达到 ${CONFIG.REACH_SOFT} 格以上；最大约 ${maxReach.toFixed(2)} 格。需结合延迟和击退复核。`, false);
         session.reachSuspects = [];
       }
     }
+  } else if (!reachEnabled) {
+    session.reachSuspects = [];
   }
 
-  const recentPlayers = session.hitEvents.filter(
-    (hit) => hit.isPlayer && now - hit.at <= CONFIG.AURA_WINDOW_MS
-  );
-  const targetIds = new Set(recentPlayers.map((hit) => hit.targetId));
-  if (recentPlayers.length >= CONFIG.HIT_RATE_COUNT && targetIds.size >= CONFIG.AURA_TARGET_COUNT) {
-    flag(session, attacker, "multi_target", "中", "短时间多目标连续命中", `约 ${CONFIG.AURA_WINDOW_MS / 1000} 秒内检测到多目标命中模式，命中玩家 ${recentPlayers.length} 次，涉及 ${targetIds.size} 名不同玩家；团战环境可能产生相似行为。`, false);
+  if (combatEnabled) {
+    const recentPlayers = session.hitEvents.filter(
+      (item) => item.isPlayer && now - item.at <= CONFIG.AURA_WINDOW_MS
+    );
+    const targetIds = new Set(recentPlayers.map((item) => item.targetId));
+    if (recentPlayers.length >= CONFIG.HIT_RATE_COUNT && targetIds.size >= CONFIG.AURA_TARGET_COUNT) {
+      flag(session, attacker, "multi_target", "中", "短时间多目标连续命中", `约 ${CONFIG.AURA_WINDOW_MS / 1000} 秒内检测到多目标命中模式，命中玩家 ${recentPlayers.length} 次，涉及 ${targetIds.size} 名不同玩家；团战环境可能产生相似行为。`, false);
+    }
+  } else {
+    session.hitEvents = [];
   }
 }
 
 function trackPlace(event) {
   const player = event.player;
-  if (!player || player.typeId !== "minecraft:player") return;
+  if (!player || player.typeId !== "minecraft:player" || !isCheckEnabled("scaffold")) return;
   const session = getSession(player);
   if (!session) return;
 
@@ -587,6 +663,7 @@ function handleScriptEvent(event) {
         pluginModeAnnounced = true;
         notifyAdmins("§a已检测到 ZP-AC Endstone 增强插件：证据将同步至插件评分/审计层；基础行为包检测仍持续运行。§r");
       }
+      syncDetectionChecksToPlugin();
     }
     return;
   }
@@ -668,6 +745,7 @@ world.afterEvents.playerSwingStart.subscribe(trackSwing);
 world.afterEvents.playerPlaceBlock.subscribe(trackPlace);
 system.runInterval(monitoringLoop, CONFIG.SAMPLE_INTERVAL);
 system.runTimeout(loadHistory, 1);
+system.runTimeout(loadDetectionChecks, 1);
 
 console.warn("[ZP-AC] Bedrock 独立基础反作弊已启动：全员移动/战斗/挥臂/搭路行为观察；无 Endstone 插件时仍可独立告警与保存历史。");
 
@@ -846,10 +924,12 @@ function showAdminPanel(player) {
       "§f运行模式：§a" + (pluginOnline ? "插件增强模式" : "行为包独立模式") + "\n" +
       "§f在线玩家：§e" + world.getPlayers().length + "\n" +
       "§f监控会话：§e" + sessions.size + "\n" +
-      "§f本地历史：§e" + history.length + " 条\n\n" +
+      "§f本地历史：§e" + history.length + " 条\n" +
+      "§f启用检测：§e" + Object.values(detectionChecks).filter(Boolean).length + "/7\n\n" +
       "§8本界面按需打开，不使用常驻 HUD。"
     )
     .button("§l系统状态")
+    .button("§l反作弊检测功能开关")
     .button("§l在线玩家监控")
     .button("§l最近检测记录")
     .button("§l增强插件管理")
@@ -862,12 +942,15 @@ function showAdminPanel(player) {
         showAdminStatus(player);
         break;
       case 1:
-        showAdminPlayers(player);
+        showDetectionSettings(player);
         break;
       case 2:
-        showAdminHistory(player);
+        showAdminPlayers(player);
         break;
       case 3:
+        showAdminHistory(player);
+        break;
+      case 4:
         showPluginAdminPanel(player);
         break;
       default:
@@ -1026,6 +1109,68 @@ function requestPluginAdmin(player, action, values = {}, callback = () => {}) {
     );
     if (stillOnline) uiAdminMessage(player, "管理请求超时；请检查增强插件和 ScriptEvent 通信。");
   }, 20 * 12);
+}
+
+function showDetectionSettings(player) {
+  if (!isUiAdmin(player)) return;
+  const rows = [
+    ["speed", "§f移动速度异常检测"],
+    ["flight", "§f飞行 / 空中悬浮检测"],
+    ["reach", "§f超距近战攻击检测"],
+    ["combat", "§f多目标连续攻击检测"],
+    ["autoclick", "§f高频连点器行为检测"],
+    ["scaffold", "§f自动搭路 / 脚边放置检测"],
+    ["fast_break", "§f快速破坏方块检测 §8（仅 Endstone 增强层）"]
+  ];
+  const form = new ModalFormData()
+    .title("§l反作弊检测功能开关")
+    .toggle(rows[0][1], isCheckEnabled("speed"))
+    .toggle(rows[1][1], isCheckEnabled("flight"))
+    .toggle(rows[2][1], isCheckEnabled("reach"))
+    .toggle(rows[3][1], isCheckEnabled("combat"))
+    .toggle(rows[4][1], isCheckEnabled("autoclick"))
+    .toggle(rows[5][1], isCheckEnabled("scaffold"))
+    .toggle(rows[6][1], isCheckEnabled("fast_break"))
+    .submitButton("§l§a保存检测配置");
+
+  form.show(player).then((result) => {
+    if (result.canceled) return;
+    const values = Array.isArray(result.formValues) ? result.formValues : [];
+    const next = {};
+    rows.forEach(([key], index) => {
+      next[key] = typeof values[index] === "boolean" ? values[index] : isCheckEnabled(key);
+    });
+
+    if (isPluginOnline()) {
+      requestPluginAdmin(player, "set_checks", { checks: next }, (admin, response) => {
+        if (!response.ok) {
+          uiAdminMessage(admin, response.error || "增强插件未能保存检测配置；原配置保持不变。");
+          showDetectionSettings(admin);
+          return;
+        }
+        const confirmed = normalizeDetectionChecks(response.data?.checks || next);
+        if (!saveDetectionChecks(confirmed)) {
+          uiAdminMessage(admin, "插件已保存配置，但行为包本地保存失败。请检查世界动态属性后重试。");
+          return;
+        }
+        const count = Object.values(confirmed).filter(Boolean).length;
+        uiAdminMessage(admin, `检测配置已同步保存：${count}/7 项启用。新配置立即生效。`);
+        showAdminPanel(admin);
+      });
+      return;
+    }
+
+    if (!saveDetectionChecks(next)) {
+      uiAdminMessage(player, "保存失败，检测配置未更改。");
+      return;
+    }
+    const count = Object.values(next).filter(Boolean).length;
+    uiAdminMessage(player, `已保存到行为包：${count}/7 项启用。Endstone 当前未连接，插件重连时会自动同步该配置。`);
+    showAdminPanel(player);
+  }).catch((error) => {
+    console.warn("[ZP-AC] 检测开关界面失败: " + error);
+    uiAdminMessage(player, "无法打开检测开关界面，请稍后重试。");
+  });
 }
 
 function handleAdminResponse(event) {
