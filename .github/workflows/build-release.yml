@@ -57,11 +57,11 @@ jobs:
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
-          assert manifest["header"]["version"] == [2, 1, 7]
-          assert manifest["modules"][0]["version"] == [2, 1, 7]
+          assert manifest["header"]["version"] == [2, 1, 8]
+          assert manifest["modules"][0]["version"] == [2, 1, 8]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.6.9"
-          assert 'version = "0.6.9"' in plugin
+          assert project["project"]["version"] == "0.7.0"
+          assert 'version = "0.7.0"' in plugin
           assert 'command: "zp_ac:ba"' in script
           assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
           assert "playerreport:ba" not in script
@@ -99,6 +99,11 @@ jobs:
           assert "public_credit_recovery_seconds" in plugin
           assert "Time spent offline" in plugin
           assert "public_credit_retaliation_seconds" in config
+          assert "function openPlayerHubMenu(player)" in script
+          assert ".button(\"§l§a查看我的信用分" in bp
+          assert ".button(\"§l§c举报其他玩家" in bp
+          assert 'name: "ba"' in plugin
+          assert 'sender.perform_command("zp_ac:ba")' in plugin
           assert "test_recovery_progress_survives_restart" in Path("tests/test_public_credit.py").read_text(encoding="utf-8")
           assert "test_retaliation_only_applies_to_same_attacker_within_five_seconds" in Path("tests/test_public_credit.py").read_text(encoding="utf-8")
           assert "test_retaliation_does_not_count_as_harassment_or_deduct_credit" in Path("tests/test_public_credit.py").read_text(encoding="utf-8")
@@ -133,7 +138,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v4
         with:
-          name: ZP-AC-2.1.7-and-Endstone-0.6.9
+          name: ZP-AC-2.1.8-and-Endstone-0.7.0
           path: |
             dist/*.mcaddon
             dist/*.whl
