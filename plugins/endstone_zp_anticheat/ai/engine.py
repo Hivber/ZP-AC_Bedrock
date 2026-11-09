@@ -115,7 +115,7 @@ class LocalBehaviorAI:
             # Do not immediately learn extreme observations; this limits baseline poisoning.
             if not anomalous or all(item[0] != key for item in anomalous):
                 history.append(value)
-        if len(anomalous) < self.min_features:
+        if len(anomalous_groups) < self.min_features:
             return None
         previous = self.last_alert.get(player_id, 0.0)
         if timestamp - previous < 90.0:
@@ -125,6 +125,7 @@ class LocalBehaviorAI:
         return {
             "kind": "local_statistical_anomaly",
             "feature_count": len(anomalous),
+            "independent_behavior_groups": len(anomalous_groups),
             "features": [
                 {"name": key, "value": round(value, 4), "robust_z": round(z, 2)}
                 for key, value, z in anomalous[:5]
