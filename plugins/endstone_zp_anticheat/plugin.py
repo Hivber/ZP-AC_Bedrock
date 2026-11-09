@@ -644,7 +644,7 @@ class ZPReportAntiCheat(Plugin):
         self._profiles_last_save = time.monotonic()
 
     def _update_profile_flag(self, player_uuid: str, code: str, points: int, high_confidence: bool) -> dict[str, Any] | None:
-        if not bool(self.cfg.get("trust_enabled", True)):
+        if not bool(self.cfg.get("trust_enabled", True)) and not bool(self.cfg.get("public_credit_enabled", True)):
             return None
         profile = self._profile_for_uuid(player_uuid)
         if profile is None:
@@ -655,9 +655,10 @@ class ZPReportAntiCheat(Plugin):
         risk_delta, trust_delta = profile_penalty(points, count, high_confidence)
         if high_confidence:
             profile["strong_flags"] = int(profile.get("strong_flags", 0)) + 1
-            profile["risk"] = min(100.0, float(profile.get("risk", 0.0)) + risk_delta)
-            profile["trust"] = max(0.0, float(profile.get("trust", 50.0)) - trust_delta)
-            profile["last_flag_at"] = time.time()
+            if bool(self.cfg.get("trust_enabled", True)):
+                profile["risk"] = min(100.0, float(profile.get("risk", 0.0)) + risk_delta)
+                profile["trust"] = max(0.0, float(profile.get("trust", 50.0)) - trust_delta)
+                profile["last_flag_at"] = time.time()
             if bool(self.cfg.get("public_credit_enabled", True)) and code in STRONG_RULES:
                 penalty = max(0.0, float(self.cfg.get("public_credit_cheat_penalty", 12.0)))
                 profile["public_credit"] = max(0.0, clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT)) - penalty)
@@ -672,7 +673,7 @@ class ZPReportAntiCheat(Plugin):
         return profile
 
     def _update_profile_activity(self, player_uuid: str, now_epoch: float) -> None:
-        if not bool(self.cfg.get("trust_enabled", True)):
+        if not bool(self.cfg.get("trust_enabled", True)) and not bool(self.cfg.get("public_credit_enabled", True)):
             return
         profile = self._profile_for_uuid(player_uuid)
         if profile is None:
@@ -681,7 +682,7 @@ class ZPReportAntiCheat(Plugin):
         delta = max(0.0, min(15.0, now_epoch - last_seen)) if last_seen > 0 else 0.0
         profile["last_seen_at"] = now_epoch
         last_flag = float(profile.get("last_flag_at", 0.0))
-        if delta > 0 and now_epoch - last_flag >= max(0.0, float(self.cfg.get("trust_recovery_delay_seconds", 3600))):
+        if bool(self.cfg.get("trust_enabled", True)) and delta > 0 and now_epoch - last_flag >= max(0.0, float(self.cfg.get("trust_recovery_delay_seconds", 3600))):
             profile["active_seconds"] = float(profile.get("active_seconds", 0.0)) + delta
             trust_rate = max(0.0, float(self.cfg.get("trust_recovery_per_hour", 0.25)))
             profile["trust"] = min(100.0, float(profile.get("trust", 50.0)) + delta * trust_rate / 3600.0)
@@ -692,7 +693,7 @@ class ZPReportAntiCheat(Plugin):
                 now_epoch - float(profile.get("last_credit_penalty_at", 0.0)),
                 float(self.cfg.get("public_credit_recovery_delay_seconds", 3600)),
             )
-        if delta > 0 and now_epoch - last_flag >= max(0.0, float(self.cfg.get("risk_decay_delay_seconds", 3600))):
+        if bool(self.cfg.get("trust_enabled", True)) and delta > 0 and now_epoch - last_flag >= max(0.0, float(self.cfg.get("risk_decay_delay_seconds", 3600))):
             risk_rate = max(0.0, float(self.cfg.get("risk_decay_per_hour", 0.20)))
             profile["risk"] = max(0.0, float(profile.get("risk", 0.0)) - delta * risk_rate / 3600.0)
         self._profiles_dirty = True
