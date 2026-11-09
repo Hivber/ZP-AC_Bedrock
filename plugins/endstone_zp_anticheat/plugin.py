@@ -35,6 +35,7 @@ from endstone.event import (
 from endstone.plugin import Plugin
 
 from .ai.engine import LocalBehaviorAI
+from .policy import has_independent_strong_evidence, profile_penalty
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -161,7 +162,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.4"
+    version = "0.6.5"
     commands = {
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
@@ -196,6 +197,7 @@ class ZPReportAntiCheat(Plugin):
             "risk_decay_per_hour": 0.20,
             "risk_decay_delay_seconds": 3600,
             "auto_kick_risk_threshold": 22.0,
+            "auto_kick_min_strong_rules": 2,
             "profile_save_interval_seconds": 60,
             "profile_limit": 10000,
             "ping_speed_threshold_start": 150,
@@ -623,20 +625,14 @@ class ZPReportAntiCheat(Plugin):
         counts = profile.setdefault("rule_counts", {})
         count = int(counts.get(code, 0)) + 1
         counts[code] = count
+        risk_delta, trust_delta = profile_penalty(points, count, high_confidence)
         if high_confidence:
-            risk_delta = 9.0 + min(5.0, points * 0.35) + min(2.0, max(0, count - 1) * 0.25)
-            trust_delta = 3.0 + min(2.0, points * 0.12)
             profile["strong_flags"] = int(profile.get("strong_flags", 0)) + 1
-        elif code in STRONG_RULES:
-            risk_delta = 5.0 + min(3.0, points * 0.25)
-            trust_delta = 1.5 + min(1.0, points * 0.08)
-        else:
-            risk_delta = max(0.8, min(3.0, points * 0.55))
-            trust_delta = 0.35
-        profile["risk"] = min(100.0, float(profile.get("risk", 0.0)) + risk_delta)
-        profile["trust"] = max(0.0, float(profile.get("trust", 50.0)) - trust_delta)
+            profile["risk"] = min(100.0, float(profile.get("risk", 0.0)) + risk_delta)
+            profile["trust"] = max(0.0, float(profile.get("trust", 50.0)) - trust_delta)
+            profile["last_flag_at"] = time.time()
+        # 弱证据仍计入审计次数，但不惩罚持久风险/可信画像，也不重置画像恢复计时。
         profile["flags"] = int(profile.get("flags", 0)) + 1
-        profile["last_flag_at"] = time.time()
         profile["last_rule"] = code
         # 只标记脏数据；由 _pulse 按 profile_save_interval_seconds 批量落盘。
         # 避免每条检测证据都触发同步磁盘 IO。
@@ -2025,6 +2021,24 @@ class ZPReportAntiCheat(Plugin):
         if len(session["rule_codes"]) < 2:
             return
         if not session["strong_codes"]:
+            return
+        minimum_strong = max(2, int(self.cfg.get("auto_kick_min_strong_rules", 2)))
+        if not has_independent_strong_evidence(
+            session["rule_codes"], session["strong_codes"], minimum_strong
+        ):
+            self._admin_alert(
+                f"§e暂缓自动踢出§r：{session['target_name']}；当前强证据仅 "
+                f"{len(session['strong_codes'])}/{minimum_strong} 项，弱辅助线索不参与自动处罚。"
+            )
+            self._log(
+                "auto_kick_deferred_insufficient_independent_strong_rules",
+                target_uuid=session.get("target_uuid"),
+                session_score=session.get("score", 0),
+                rule_codes=sorted(session.get("rule_codes", set())),
+                strong_codes=sorted(session.get("strong_codes", set())),
+                required_strong_rules=minimum_strong,
+                action="review_only_no_kick",
+            )
             return
 
         # 严重检测只产生本地待复核候选；永久封禁仍必须由管理员显式确认。
