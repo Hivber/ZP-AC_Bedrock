@@ -26,12 +26,52 @@ class PublicCreditPolicyTests(unittest.TestCase):
     def test_explicit_bypass_is_supported(self):
         self.assertTrue(MODULE.can_damage_players(0, 70.0, exempt=True))
 
-    def test_recovery_requires_delay_and_active_time(self):
-        self.assertEqual(MODULE.recover_public_credit(60, 3600, 0.5, 1200, 3600), 60.0)
-        self.assertEqual(MODULE.recover_public_credit(60, 3600, 0.5, 7200, 3600), 60.5)
+    def test_one_hour_online_restores_half_a_point(self):
+        score, progress = MODULE.accrue_public_credit(80.0, 0.0, 3600.0, 0.5)
+        self.assertEqual(score, 80.5)
+        self.assertEqual(progress, 0.0)
 
-    def test_recovery_caps_at_100(self):
-        self.assertEqual(MODULE.recover_public_credit(99.9, 3600, 5.0, 7200, 3600), 100.0)
+    def test_recovery_progress_survives_restart(self):
+        # The persisted 35-minute remainder is continued after process restart.
+        score, progress = MODULE.accrue_public_credit(80.0, 2100.0, 1500.0, 0.5)
+        self.assertEqual(score, 80.5)
+        self.assertEqual(progress, 0.0)
+
+    def test_partial_recovery_progress_is_preserved(self):
+        score, progress = MODULE.accrue_public_credit(80.0, 1800.0, 900.0, 0.5)
+        self.assertEqual(score, 80.0)
+        self.assertEqual(progress, 2700.0)
+
+    def test_retaliation_does_not_count_as_harassment_or_deduct_credit(self):
+        self.assertFalse(MODULE.should_count_pvp_hit(True))
+        self.assertTrue(MODULE.should_count_pvp_hit(False))
+        # The retaliation path is excluded before the harassment penalty function.
+        self.assertEqual(MODULE.apply_public_credit_penalty(55.0, 0.0), 55.0)
+
+    def test_retaliation_only_applies_to_same_attacker_within_five_seconds(self):
+        self.assertTrue(MODULE.is_retaliation_allowed(100.0, 105.0, 5.0))
+        self.assertFalse(MODULE.is_retaliation_allowed(100.0, 105.01, 5.0))
+        self.assertFalse(MODULE.is_retaliation_allowed(0.0, 104.0, 5.0))
+
+
+    def test_player_command_exposes_only_public_credit(self):
+        plugin = (CREDIT_PATH.parent / "plugin.py").read_text(encoding="utf-8")
+        start = plugin.index('if command.name == "zp":')
+        end = plugin.index('if command.name != "zpac":', start)
+        block = plugin[start:end]
+        self.assertIn("公开信用分", block)
+        self.assertNotIn("trust", block.lower())
+        self.assertNotIn("risk", block.lower())
+        self.assertNotIn("UUID=", block)
+
+    def test_admin_query_is_guarded(self):
+        plugin = (CREDIT_PATH.parent / "plugin.py").read_text(encoding="utf-8")
+        start = plugin.index('if action == "credit":')
+        end = plugin.index('if action in {"trust", "profile"}:', start)
+        block = plugin[start:end]
+        self.assertIn("if not self._is_admin_sender(sender):", block)
+        self.assertIn("目标公开信用分", block)
+        self.assertNotIn("隐藏可信分", block)
 
     def test_penalty_never_goes_below_zero(self):
         self.assertEqual(MODULE.apply_public_credit_penalty(4, 12), 0.0)
