@@ -57,8 +57,8 @@ jobs:
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
-          assert manifest["header"]["version"] == [2, 1, 8]
-          assert manifest["modules"][0]["version"] == [2, 1, 8]
+          assert manifest["header"]["version"] == [2, 1, 9]
+          assert manifest["modules"][0]["version"] == [2, 1, 9]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
           assert project["project"]["version"] == "0.6.9"
           assert 'version = "0.6.9"' in plugin
@@ -137,7 +137,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v4
         with:
-          name: ZP-AC-2.1.8-and-Endstone-0.6.9
+          name: ZP-AC-2.1.9-and-Endstone-0.6.9
           path: |
             dist/*.mcaddon
             dist/*.whl

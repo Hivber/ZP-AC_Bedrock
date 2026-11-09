@@ -1,13 +1,13 @@
 {
   "format_version": 2,
   "header": {
-    "name": "ZP-AC 反作弊（独立运行 + Endstone 增强 + 举报）",
-    "description": "单一行为包：无插件时独立基础检测；安装 Endstone 增强插件时自动桥接增强；内置 /ba 综合菜单（信用分与举报）。",
+    "name": "ZP-AC 反作弊（行为包 + UI 资源包）",
+    "description": "ZP-AC 反作弊：独立行为包与配套科技风资源包；内置 /ba 综合菜单（信用分与举报）。",
     "uuid": "a8c93fd8-8e7e-43a3-99e0-53b177df2f24",
     "version": [
       2,
       1,
-      8
+      9
     ],
     "min_engine_version": [
       1,
@@ -23,7 +23,7 @@
       "version": [
         2,
         1,
-        8
+        9
       ],
       "entry": "scripts/main.js"
     }
@@ -36,6 +36,14 @@
     {
       "module_name": "@minecraft/server-ui",
       "version": "2.2.0"
+    },
+    {
+      "uuid": "f3c8a0b1-7d26-4e9a-9b42-6c51d8e2a730",
+      "version": [
+        1,
+        0,
+        0
+      ]
     }
   ]
 }
