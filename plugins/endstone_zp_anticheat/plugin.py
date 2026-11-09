@@ -185,10 +185,6 @@ class ZPReportAntiCheat(Plugin):
             "description": "允许玩家使用 /zp 查看自己的公开信用分。",
             "default": True,
         },
-        "zp_report_anticheat.credit.admin": {
-            "description": "允许管理员查询其他玩家的公开信用分。",
-            "default": False,
-        },
     }
 
     def on_enable(self) -> None:
@@ -207,7 +203,6 @@ class ZPReportAntiCheat(Plugin):
             "public_credit_enabled": True,
             "public_credit_initial_score": 100.0,
             "public_credit_recovery_per_hour": 0.5,
-            "public_credit_recovery_delay_seconds": 0,
             "public_credit_retaliation_seconds": 5.0,
             "public_credit_lock_threshold": 70.0,
             "public_credit_cheat_penalty": 12.0,
@@ -1786,6 +1781,15 @@ class ZPReportAntiCheat(Plugin):
                     return
                 if not is_retaliation:
                     self._record_public_pvp_hit(attacker_key, victim_key)
+                else:
+                    # Mark the exchange as reciprocal so the original attacker is
+                    # not penalized for a one-sided assault after the victim fights back.
+                    reciprocal = self.pvp_recent_hits[(attacker_key, victim_key)]
+                    reciprocal.append(now_pvp)
+                    while reciprocal and now_pvp - reciprocal[0] > max(
+                        5.0, float(self.cfg.get("public_credit_assault_window_seconds", 20.0))
+                    ):
+                        reciprocal.popleft()
             # Record allowed incoming damage as a five-second retaliation opportunity.
             self.pvp_last_hit_at[(victim_key, attacker_key)] = now_pvp
             for old_key, old_time in list(self.pvp_last_hit_at.items()):
