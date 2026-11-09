@@ -14,19 +14,19 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
 
@@ -66,6 +66,14 @@ jobs:
           assert resource_manifest["header"]["version"] == [1, 0, 0]
           assert resource_manifest["header"]["min_engine_version"] == [1, 26, 60]
           assert resource_manifest["modules"][0]["type"] == "resources"
+          languages = json.loads(Path("resource_pack/texts/languages.json").read_text(encoding="utf-8"))
+          assert languages == ["zh_CN", "en_US"]
+          zh = Path("resource_pack/texts/zh_CN.lang").read_text(encoding="utf-8")
+          en = Path("resource_pack/texts/en_US.lang").read_text(encoding="utf-8")
+          assert "pack.name=" in zh and "pack.description=" in zh
+          assert "pack.name=" in en and "pack.description=" in en
+          assert resource_manifest["header"]["name"] == "pack.name"
+          assert resource_manifest["header"]["description"] == "pack.description"
           assert any(dep.get("uuid") == resource_manifest["header"]["uuid"] and dep.get("version") == resource_manifest["header"]["version"] for dep in manifest["dependencies"])
           for asset in ("pack_icon.png", "textures/ui/zp_ac_logo.png", "textures/ui/icon_shield.png", "textures/ui/icon_credit.png", "textures/ui/icon_report.png", "textures/ui/menu_panel.png"):
               assert Path("resource_pack", asset).is_file(), asset
@@ -146,7 +154,7 @@ jobs:
           ls -lh dist/
 
       - name: Upload ZP-AC packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ZP-AC-2.1.9-and-Endstone-0.6.9
           path: |
