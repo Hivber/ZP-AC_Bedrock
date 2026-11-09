@@ -42,6 +42,8 @@ BP_EVIDENCE_ID = "zp:ac_bp_evidence"
 BP_ADMIN_REQUEST_ID = "zp:ac_admin_request"
 BP_ADMIN_RESPONSE_ID = "zp:ac_admin_response"
 BP_ADMIN_PROTOCOL = "zp-ac-admin-v1"
+BP_CHECKS_SYNC_ID = "zp:ac_checks_sync"
+BP_CHECKS_PROTOCOL = "zp-ac-checks-v1"
 BP_OP_ADMIN_TAG = "zp_ac_op_admin"
 BP_PROTOCOL = "zp-ac-bp-v1"
 BP_RULE_MAP = {
@@ -53,6 +55,16 @@ BP_RULE_MAP = {
     "autoclick": ("autoclick_pattern", False),
     "multi_target": ("multi_target_combat", False),
     "scaffold": ("scaffold_pattern", False),
+}
+DEFAULT_ANTI_CHEAT_CHECKS = {
+    "speed": True, "flight": True, "reach": True, "combat": True,
+    "autoclick": True, "scaffold": True, "fast_break": True,
+}
+RULE_CHECK_GROUP = {
+    "speed_sustained": "speed", "hover_confirmed": "flight",
+    "reach_extreme": "reach", "reach_repeated": "reach",
+    "multi_target_combat": "combat", "rapid_block_break": "fast_break",
+    "autoclick_pattern": "autoclick", "scaffold_pattern": "scaffold",
 }
 ADMIN_TAGS = {"zp_ac_admin", "zp:ac_admin", BP_OP_ADMIN_TAG}
 BYPASS_TAGS = {"zp_ac_bypass", "zp:ac_bypass"}
@@ -144,7 +156,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.1"
+    version = "0.6.2"
     commands = {
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
@@ -165,6 +177,7 @@ class ZPReportAntiCheat(Plugin):
         self.save_default_config()
         defaults = {
             "behavior_pack_bridge_enabled": True,
+            "anti_cheat_checks": dict(DEFAULT_ANTI_CHEAT_CHECKS),
             "cloud_enabled": False,
             "cloud_endpoint": "",
             "cloud_read_token": "",
@@ -354,6 +367,38 @@ class ZPReportAntiCheat(Plugin):
             return float(values[idx])
         except Exception:
             return float(default[min(self._tier_index(tier), len(default) - 1)])
+
+    def _anti_cheat_checks(self) -> dict[str, bool]:
+        raw = self.cfg.get("anti_cheat_checks", {})
+        if not isinstance(raw, dict):
+            raw = {}
+        return {key: raw.get(key, default) is not False for key, default in DEFAULT_ANTI_CHEAT_CHECKS.items()}
+
+    def _check_enabled(self, key: str) -> bool:
+        return self._anti_cheat_checks().get(key, True)
+
+    def _store_anti_cheat_checks(self, values: Any) -> dict[str, bool]:
+        if not isinstance(values, dict):
+            raise ValueError("检测配置格式无效。")
+        normalized = self._anti_cheat_checks()
+        for key in DEFAULT_ANTI_CHEAT_CHECKS:
+            if not isinstance(values.get(key), bool):
+                raise ValueError(f"检测配置项 {key} 缺少有效布尔值。")
+            normalized[key] = values[key]
+        previous = self._anti_cheat_checks()
+        if normalized == previous:
+            return normalized
+        self.cfg["anti_cheat_checks"] = dict(normalized)
+        self.config["anti_cheat_checks"] = dict(normalized)
+        try:
+            self.save_config()
+        except Exception:
+            self.cfg["anti_cheat_checks"] = previous
+            self.config["anti_cheat_checks"] = previous
+            raise
+        enabled = sum(1 for value in normalized.values() if value)
+        self.logger.info(f"管理员更新反作弊检测开关：{enabled}/{len(normalized)} 项启用。")
+        return normalized
 
     def _new_session(self, target: Any, reporter: Any, reason: str, report_id: str) -> dict[str, Any]:
         now = time.monotonic()
@@ -1030,6 +1075,26 @@ class ZPReportAntiCheat(Plugin):
         except Exception as exc:
             self.logger.warning(f"发送 ZP-AC 管理响应失败：{type(exc).__name__}")
 
+    def _on_behavior_pack_checks_sync(self, event: ScriptMessageEvent) -> None:
+        if not bool(self.cfg.get("behavior_pack_bridge_enabled", True)):
+            return
+        sender = getattr(event, "sender", None)
+        sender_name = _clean(getattr(sender, "name", ""), 32).lower()
+        if not isinstance(sender, ConsoleCommandSender) and sender_name not in {"server", "console"}:
+            self.logger.warning("忽略非服务端来源的反作弊检测配置同步。")
+            return
+        try:
+            payload = json.loads(unquote(event.message or ""))
+            if not isinstance(payload, dict) or payload.get("version") != BP_CHECKS_PROTOCOL:
+                return
+            previous = self._anti_cheat_checks()
+            checks = self._store_anti_cheat_checks(payload.get("checks"))
+            if checks != previous:
+                enabled = sum(1 for value in checks.values() if value)
+                self.logger.info(f"已从行为包同步反作弊检测开关：{enabled}/{len(checks)} 项启用。")
+        except Exception as exc:
+            self.logger.warning(f"行为包检测配置同步失败：{_clean(str(exc), 160)}")
+
     def _on_behavior_pack_admin_request(self, event: ScriptMessageEvent) -> None:
         if not bool(self.cfg.get("behavior_pack_bridge_enabled", True)):
             return
@@ -1073,7 +1138,9 @@ class ZPReportAntiCheat(Plugin):
             player_uuid = self._canonical_uuid(payload.get("uuid"))
             data: dict[str, Any]
 
-            if action == "overview":
+            if action == "set_checks":
+                data = {"checks": self._store_anti_cheat_checks(payload.get("checks"))}
+            elif action == "overview":
                 cloud_ready, cloud_problem = self._cloud_config_ready()
                 data = {
                     "plugin_version": self.version,
@@ -1301,6 +1368,9 @@ class ZPReportAntiCheat(Plugin):
     @event_handler
     def on_script_message(self, event: ScriptMessageEvent) -> None:
         message_id = getattr(event, "message_id", "")
+        if message_id == BP_CHECKS_SYNC_ID:
+            self._on_behavior_pack_checks_sync(event)
+            return
         if message_id == BP_ADMIN_REQUEST_ID:
             self._on_behavior_pack_admin_request(event)
             return
