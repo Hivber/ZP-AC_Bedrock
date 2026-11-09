@@ -38,7 +38,7 @@ from endstone.plugin import Plugin
 from .ai.engine import LocalBehaviorAI
 from .movement import read_effect_amplifier, speed_effect_multiplier
 from .policy import has_independent_strong_evidence, profile_penalty
-from .credit import PUBLIC_CREDIT_DEFAULT, PUBLIC_CREDIT_LOCK_THRESHOLD, can_damage_players, clamp_public_credit, recover_public_credit
+from .credit import PUBLIC_CREDIT_DEFAULT, PUBLIC_CREDIT_LOCK_THRESHOLD, accrue_public_credit, can_damage_players, clamp_public_credit, is_retaliation_allowed
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -165,7 +165,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.8"
+    version = "0.6.9"
     commands = {
         "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
@@ -207,7 +207,8 @@ class ZPReportAntiCheat(Plugin):
             "public_credit_enabled": True,
             "public_credit_initial_score": 100.0,
             "public_credit_recovery_per_hour": 0.5,
-            "public_credit_recovery_delay_seconds": 3600,
+            "public_credit_recovery_delay_seconds": 0,
+            "public_credit_retaliation_seconds": 5.0,
             "public_credit_lock_threshold": 70.0,
             "public_credit_cheat_penalty": 12.0,
             "public_credit_assault_window_seconds": 20.0,
@@ -697,16 +698,14 @@ class ZPReportAntiCheat(Plugin):
             profile["trust"] = min(100.0, float(profile.get("trust", 50.0)) + delta * trust_rate / 3600.0)
         if delta > 0 and bool(self.cfg.get("public_credit_enabled", True)):
             # Persist sub-hour online time so restarts never reset recovery progress.
-            progress = max(0.0, float(profile.get("public_credit_recovery_seconds", 0.0))) + delta
-            completed_hours = int(progress // 3600.0)
-            if completed_hours:
-                rate = max(0.0, float(self.cfg.get("public_credit_recovery_per_hour", 0.5)))
-                profile["public_credit"] = min(
-                    100.0,
-                    clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT)) + completed_hours * rate,
-                )
-                progress -= completed_hours * 3600.0
-            profile["public_credit_recovery_seconds"] = min(3599.99, progress)
+            score, progress = accrue_public_credit(
+                profile.get("public_credit", PUBLIC_CREDIT_DEFAULT),
+                profile.get("public_credit_recovery_seconds", 0.0),
+                delta,
+                float(self.cfg.get("public_credit_recovery_per_hour", 0.5)),
+            )
+            profile["public_credit"] = score
+            profile["public_credit_recovery_seconds"] = progress
         if bool(self.cfg.get("trust_enabled", True)) and delta > 0 and now_epoch - last_flag >= max(0.0, float(self.cfg.get("risk_decay_delay_seconds", 3600))):
             risk_rate = max(0.0, float(self.cfg.get("risk_decay_per_hour", 0.20)))
             profile["risk"] = max(0.0, float(profile.get("risk", 0.0)) - delta * risk_rate / 3600.0)
@@ -1771,7 +1770,7 @@ class ZPReportAntiCheat(Plugin):
             retaliation_key = (attacker_key, victim_key)
             retaliated_at = self.pvp_last_hit_at.get(retaliation_key, 0.0)
             retaliation_window = max(0.0, float(self.cfg.get("public_credit_retaliation_seconds", 5.0)))
-            is_retaliation = retaliated_at > 0.0 and now_pvp - retaliated_at <= retaliation_window
+            is_retaliation = is_retaliation_allowed(retaliated_at, now_pvp, retaliation_window)
             if bool(self.cfg.get("public_credit_enabled", True)):
                 attacker_profile = self._profile_for_uuid(attacker_key)
                 credit = clamp_public_credit(attacker_profile.get("public_credit", PUBLIC_CREDIT_DEFAULT))
