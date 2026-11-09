@@ -52,6 +52,7 @@ jobs:
           plugin = Path("plugins/endstone_zp_anticheat/plugin.py").read_text(encoding="utf-8")
           ai_engine = Path("plugins/endstone_zp_anticheat/ai/engine.py").read_text(encoding="utf-8")
           policy = Path("plugins/endstone_zp_anticheat/policy.py").read_text(encoding="utf-8")
+          credit = Path("plugins/endstone_zp_anticheat/credit.py").read_text(encoding="utf-8")
           movement = Path("plugins/endstone_zp_anticheat/movement.py").read_text(encoding="utf-8")
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
@@ -59,8 +60,8 @@ jobs:
           assert manifest["header"]["version"] == [2, 1, 7]
           assert manifest["modules"][0]["version"] == [2, 1, 7]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.6.7"
-          assert 'version = "0.6.7"' in plugin
+          assert project["project"]["version"] == "0.6.8"
+          assert 'version = "0.6.8"' in plugin
           assert 'command: "zp_ac:ba"' in script
           assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
           assert "playerreport:ba" not in script
@@ -83,6 +84,13 @@ jobs:
           assert "SPAWN_GRACE_TICKS" in script
           assert "auto_kick_min_strong_rules" in config
           assert "def has_independent_strong_evidence" in policy
+          assert "can_damage_players" in credit
+          assert "recover_public_credit" in credit
+          assert 'command.name == "zp"' in plugin
+          assert "public_credit_lock_threshold" in plugin
+          assert "repeated_one_sided_pvp" in plugin
+          assert config["public_credit_initial_score"] == 100.0
+          assert config["public_credit_lock_threshold"] == 70.0
           assert "def analyze(" in ai_engine
           assert "def read_effect_amplifier(" in movement
           assert "def speed_effect_multiplier(" in movement
@@ -112,7 +120,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v4
         with:
-          name: ZP-AC-2.1.7-and-Endstone-0.6.7
+          name: ZP-AC-2.1.7-and-Endstone-0.6.8
           path: |
             dist/*.mcaddon
             dist/*.whl

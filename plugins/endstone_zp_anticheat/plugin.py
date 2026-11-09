@@ -38,6 +38,7 @@ from endstone.plugin import Plugin
 from .ai.engine import LocalBehaviorAI
 from .movement import read_effect_amplifier, speed_effect_multiplier
 from .policy import has_independent_strong_evidence, profile_penalty
+from .credit import PUBLIC_CREDIT_DEFAULT, PUBLIC_CREDIT_LOCK_THRESHOLD, can_damage_players, clamp_public_credit, recover_public_credit
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -164,8 +165,9 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.7"
+    version = "0.6.8"
     commands = {
+        "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
             "usages": [
@@ -178,7 +180,11 @@ class ZPReportAntiCheat(Plugin):
         "zp_report_anticheat.admin": {
             "description": "允许管理 ZP 反作弊、云端同步及确认永久封禁。",
             "default": True,
-        }
+        },
+        "zp_report_anticheat.credit": {
+            "description": "允许玩家使用 /zp 查看自己的公开信用分。",
+            "default": True,
+        },
     }
 
     def on_enable(self) -> None:
@@ -194,6 +200,16 @@ class ZPReportAntiCheat(Plugin):
             "cloud_timeout_seconds": 4,
             "trust_enabled": True,
             "trust_initial_score": 50.0,
+            "public_credit_enabled": True,
+            "public_credit_initial_score": 100.0,
+            "public_credit_recovery_per_hour": 0.5,
+            "public_credit_recovery_delay_seconds": 3600,
+            "public_credit_lock_threshold": 70.0,
+            "public_credit_cheat_penalty": 12.0,
+            "public_credit_assault_window_seconds": 20.0,
+            "public_credit_assault_hits_required": 8,
+            "public_credit_assault_penalty": 5.0,
+            "public_credit_assault_cooldown_seconds": 600.0,
             "trust_recovery_per_hour": 0.25,
             "trust_recovery_delay_seconds": 3600,
             "risk_decay_per_hour": 0.20,
@@ -240,6 +256,9 @@ class ZPReportAntiCheat(Plugin):
         self.packet_second: dict[str, dict[str, Any]] = {}
         self.break_events: dict[str, deque[float]] = defaultdict(deque)
         self.click_events: dict[str, deque[float]] = defaultdict(deque)
+        self.pvp_recent_hits: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+        self.pvp_penalty_cooldowns: dict[tuple[str, str], float] = {}
+        self.pvp_message_cooldowns: dict[str, float] = {}
         self.audit_path = Path(self.data_folder) / "evidence.jsonl"
         self.data_path = Path(self.data_folder)
         self.data_path.mkdir(parents=True, exist_ok=True)
@@ -550,6 +569,8 @@ class ZPReportAntiCheat(Plugin):
                         rules = {}
                     profiles[key] = {
                         "trust": max(0.0, min(100.0, float(item.get("trust", 50.0)))),
+                        "public_credit": clamp_public_credit(item.get("public_credit", PUBLIC_CREDIT_DEFAULT)),
+                        "last_credit_penalty_at": max(0.0, float(item.get("last_credit_penalty_at", 0.0))),
                         "risk": max(0.0, min(100.0, float(item.get("risk", 0.0)))),
                         "flags": max(0, int(item.get("flags", 0))),
                         "strong_flags": max(0, int(item.get("strong_flags", 0))),
@@ -580,6 +601,8 @@ class ZPReportAntiCheat(Plugin):
             initial = max(0.0, min(100.0, float(self.cfg.get("trust_initial_score", 50.0))))
             profile = {
                 "trust": initial,
+                "public_credit": clamp_public_credit(self.cfg.get("public_credit_initial_score", PUBLIC_CREDIT_DEFAULT)),
+                "last_credit_penalty_at": 0.0,
                 "risk": 0.0,
                 "flags": 0,
                 "strong_flags": 0,
@@ -602,6 +625,8 @@ class ZPReportAntiCheat(Plugin):
                 continue
             profiles[normalized] = {
                 "trust": round(max(0.0, min(100.0, float(item.get("trust", 50.0)))), 2),
+                "public_credit": round(clamp_public_credit(item.get("public_credit", PUBLIC_CREDIT_DEFAULT)), 2),
+                "last_credit_penalty_at": float(item.get("last_credit_penalty_at", 0.0)),
                 "risk": round(max(0.0, min(100.0, float(item.get("risk", 0.0)))), 2),
                 "flags": max(0, int(item.get("flags", 0))),
                 "strong_flags": max(0, int(item.get("strong_flags", 0))),
@@ -619,7 +644,7 @@ class ZPReportAntiCheat(Plugin):
         self._profiles_last_save = time.monotonic()
 
     def _update_profile_flag(self, player_uuid: str, code: str, points: int, high_confidence: bool) -> dict[str, Any] | None:
-        if not bool(self.cfg.get("trust_enabled", True)):
+        if not bool(self.cfg.get("trust_enabled", True)) and not bool(self.cfg.get("public_credit_enabled", True)):
             return None
         profile = self._profile_for_uuid(player_uuid)
         if profile is None:
@@ -630,9 +655,15 @@ class ZPReportAntiCheat(Plugin):
         risk_delta, trust_delta = profile_penalty(points, count, high_confidence)
         if high_confidence:
             profile["strong_flags"] = int(profile.get("strong_flags", 0)) + 1
-            profile["risk"] = min(100.0, float(profile.get("risk", 0.0)) + risk_delta)
-            profile["trust"] = max(0.0, float(profile.get("trust", 50.0)) - trust_delta)
-            profile["last_flag_at"] = time.time()
+            if bool(self.cfg.get("trust_enabled", True)):
+                profile["risk"] = min(100.0, float(profile.get("risk", 0.0)) + risk_delta)
+                profile["trust"] = max(0.0, float(profile.get("trust", 50.0)) - trust_delta)
+                profile["last_flag_at"] = time.time()
+            if bool(self.cfg.get("public_credit_enabled", True)) and code in STRONG_RULES:
+                penalty = max(0.0, float(self.cfg.get("public_credit_cheat_penalty", 12.0)))
+                profile["public_credit"] = max(0.0, clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT)) - penalty)
+                profile["last_credit_penalty_at"] = time.time()
+                self._log("public_credit_penalty", target_uuid=player_uuid, source="high_confidence_anticheat", rule=code, penalty=round(penalty, 2), public_credit=round(profile["public_credit"], 2))
         # 弱证据仍计入审计次数，但不惩罚持久风险/可信画像，也不重置画像恢复计时。
         profile["flags"] = int(profile.get("flags", 0)) + 1
         profile["last_rule"] = code
@@ -642,7 +673,7 @@ class ZPReportAntiCheat(Plugin):
         return profile
 
     def _update_profile_activity(self, player_uuid: str, now_epoch: float) -> None:
-        if not bool(self.cfg.get("trust_enabled", True)):
+        if not bool(self.cfg.get("trust_enabled", True)) and not bool(self.cfg.get("public_credit_enabled", True)):
             return
         profile = self._profile_for_uuid(player_uuid)
         if profile is None:
@@ -651,11 +682,18 @@ class ZPReportAntiCheat(Plugin):
         delta = max(0.0, min(15.0, now_epoch - last_seen)) if last_seen > 0 else 0.0
         profile["last_seen_at"] = now_epoch
         last_flag = float(profile.get("last_flag_at", 0.0))
-        if delta > 0 and now_epoch - last_flag >= max(0.0, float(self.cfg.get("trust_recovery_delay_seconds", 3600))):
+        if bool(self.cfg.get("trust_enabled", True)) and delta > 0 and now_epoch - last_flag >= max(0.0, float(self.cfg.get("trust_recovery_delay_seconds", 3600))):
             profile["active_seconds"] = float(profile.get("active_seconds", 0.0)) + delta
             trust_rate = max(0.0, float(self.cfg.get("trust_recovery_per_hour", 0.25)))
             profile["trust"] = min(100.0, float(profile.get("trust", 50.0)) + delta * trust_rate / 3600.0)
-        if delta > 0 and now_epoch - last_flag >= max(0.0, float(self.cfg.get("risk_decay_delay_seconds", 3600))):
+        if delta > 0 and bool(self.cfg.get("public_credit_enabled", True)):
+            profile["public_credit"] = recover_public_credit(
+                profile.get("public_credit", PUBLIC_CREDIT_DEFAULT), delta,
+                float(self.cfg.get("public_credit_recovery_per_hour", 0.5)),
+                now_epoch - float(profile.get("last_credit_penalty_at", 0.0)),
+                float(self.cfg.get("public_credit_recovery_delay_seconds", 3600)),
+            )
+        if bool(self.cfg.get("trust_enabled", True)) and delta > 0 and now_epoch - last_flag >= max(0.0, float(self.cfg.get("risk_decay_delay_seconds", 3600))):
             risk_rate = max(0.0, float(self.cfg.get("risk_decay_per_hour", 0.20)))
             profile["risk"] = max(0.0, float(profile.get("risk", 0.0)) - delta * risk_rate / 3600.0)
         self._profiles_dirty = True
@@ -883,6 +921,24 @@ class ZPReportAntiCheat(Plugin):
             self._start_cloud_sync("admin_enable")
 
     def on_command(self, sender: CommandSender, command: Command, args: list[str]) -> bool:
+        if command.name == "zp":
+            if isinstance(sender, ConsoleCommandSender):
+                sender.send_message("§e/zp 只能由在线玩家执行。")
+                return True
+            player = self._find_online_player(_clean(getattr(sender, "name", ""), 64))
+            player_uuid = _player_key(player) if player is not None else None
+            if not player_uuid:
+                sender.send_message("§c无法读取你的玩家 UUID，暂时无法查询信用分。")
+                return True
+            profile = self._profile_for_uuid(player_uuid)
+            score = clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT))
+            threshold = float(self.cfg.get("public_credit_lock_threshold", PUBLIC_CREDIT_LOCK_THRESHOLD))
+            status = f"§c低于 {threshold:.0f} 分：暂时无法攻击其他玩家。" if score < threshold else "§a正常：可以参与玩家间战斗。"
+            sender.send_message(
+                f"§8[§bZP 信用系统§8] §f你的公开信用分：§e{score:.1f}/100\n"
+                f"§7长期正常在线游戏可逐步恢复；严重违规或确认的作弊行为会降低分数。\\n{status}"
+            )
+            return True
         if command.name != "zpac":
             return True
         if not self._is_admin_sender(sender):
@@ -1664,17 +1720,40 @@ class ZPReportAntiCheat(Plugin):
     def on_actor_damage(self, event: ActorDamageEvent) -> None:
         reach_enabled = self._check_enabled("reach")
         combat_enabled = self._check_enabled("combat")
-        if not reach_enabled and not combat_enabled:
-            return
         try:
-            source = event.damage_source
-            if bool(source.is_indirect):
+            if bool(getattr(event, "is_cancelled", False)):
                 return
+            source = event.damage_source
             attacker = source.damaging_actor
             victim = event.actor
             attacker_key = _player_key(attacker)
             victim_key = _player_key(victim)
             if not attacker_key or not victim_key or attacker_key == victim_key:
+                return
+            # Resolve both actors against the online player list so mobs and other
+            # non-player actors can never be blocked by the PvP credit gate.
+            online_attacker = self._find_online_player(_player_name(attacker))
+            online_victim = self._find_online_player(_player_name(victim))
+            if online_attacker is None or online_victim is None:
+                return
+            if _player_key(online_attacker) != attacker_key or _player_key(online_victim) != victim_key:
+                return
+            attacker, victim = online_attacker, online_victim
+            if bool(self.cfg.get("public_credit_enabled", True)):
+                attacker_profile = self._profile_for_uuid(attacker_key)
+                credit = clamp_public_credit(attacker_profile.get("public_credit", PUBLIC_CREDIT_DEFAULT))
+                threshold = float(self.cfg.get("public_credit_lock_threshold", PUBLIC_CREDIT_LOCK_THRESHOLD))
+                if not can_damage_players(credit, threshold, False):
+                    event.is_cancelled = True
+                    now_message = time.monotonic()
+                    if now_message - self.pvp_message_cooldowns.get(attacker_key, 0.0) >= 2.0:
+                        attacker.send_message(f"§c[ZP信用系统] 你的信用分为 {credit:.1f}，低于 {threshold:.0f} 分，暂时不能攻击其他玩家。使用 /zp 查看详情。")
+                        self.pvp_message_cooldowns[attacker_key] = now_message
+                    return
+                self._record_public_pvp_hit(attacker_key, victim_key)
+            if not reach_enabled and not combat_enabled:
+                return
+            if bool(source.is_indirect):
                 return
             session = self.sessions.get(attacker_key)
             if session is None or session["kicked"]:
@@ -1758,6 +1837,43 @@ class ZPReportAntiCheat(Plugin):
                 session["combat_hits"].clear()
         except Exception as exc:
             self.logger.warning(f"处理攻击事件失败: {exc}")
+
+    def _record_public_pvp_hit(self, attacker_uuid: str, victim_uuid: str) -> None:
+        """Penalize repeated one-sided PvP harassment, not reciprocal combat."""
+        now = time.monotonic()
+        window = max(5.0, float(self.cfg.get("public_credit_assault_window_seconds", 20.0)))
+        pair = (attacker_uuid, victim_uuid)
+        reverse = (victim_uuid, attacker_uuid)
+        hits = self.pvp_recent_hits[pair]
+        hits.append(now)
+        while hits and now - hits[0] > window:
+            hits.popleft()
+        reverse_hits = self.pvp_recent_hits.get(reverse, deque())
+        while reverse_hits and now - reverse_hits[0] > window:
+            reverse_hits.popleft()
+        required = max(3, int(self.cfg.get("public_credit_assault_hits_required", 8)))
+        cooldown = max(window, float(self.cfg.get("public_credit_assault_cooldown_seconds", 600.0)))
+        if len(hits) < required or reverse_hits or now - self.pvp_penalty_cooldowns.get(pair, 0.0) < cooldown:
+            return
+        profile = self._profile_for_uuid(attacker_uuid)
+        if profile is None:
+            return
+        penalty = max(0.0, float(self.cfg.get("public_credit_assault_penalty", 5.0)))
+        after = max(0.0, clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT)) - penalty)
+        profile["public_credit"] = after
+        profile["last_credit_penalty_at"] = time.time()
+        self._profiles_dirty = True
+        self.pvp_penalty_cooldowns[pair] = now
+        hits.clear()
+        self._log("public_credit_penalty", target_uuid=attacker_uuid, victim_uuid=victim_uuid,
+                  source="repeated_one_sided_pvp", hit_count=required, penalty=round(penalty, 2),
+                  public_credit=round(after, 2))
+        attacker = next((p for p in list(self.server.online_players) if _player_key(p) == attacker_uuid), None)
+        if attacker is not None:
+            try:
+                attacker.send_message(f"§e[ZP信用系统] 检测到短时间内持续单方面攻击玩家，信用分降低 {penalty:.1f} 分。当前信用分：{after:.1f}/100。")
+            except Exception:
+                pass
 
     @staticmethod
     def _prune_deque(items: deque, cutoff: float) -> None:
