@@ -1,0 +1,29 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "ZP-AC UI Resource Pack",
+    "description": "ZP-AC 深色科技风界面图标与视觉资源",
+    "uuid": "a6e65709-b8e3-4b6f-88e3-6fc5a83fda23",
+    "version": [
+      1,
+      0,
+      0
+    ],
+    "min_engine_version": [
+      1,
+      26,
+      60
+    ]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "fee6492d-5855-40c5-ba1e-7b358e8aaac5",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    }
+  ]
+}

@@ -48,6 +48,7 @@ jobs:
           from pathlib import Path
 
           manifest = json.loads(Path("mcaddon/manifest.json").read_text(encoding="utf-8"))
+          resource_manifest = json.loads(Path("resource_pack/manifest.json").read_text(encoding="utf-8"))
           script = Path("mcaddon/scripts/main.js").read_text(encoding="utf-8")
           plugin = Path("plugins/endstone_zp_anticheat/plugin.py").read_text(encoding="utf-8")
           ai_engine = Path("plugins/endstone_zp_anticheat/ai/engine.py").read_text(encoding="utf-8")
@@ -57,9 +58,14 @@ jobs:
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
-          assert manifest["header"]["version"] == [2, 1, 8]
-          assert manifest["modules"][0]["version"] == [2, 1, 8]
+          assert manifest["header"]["version"] == [2, 1, 9]
+          assert manifest["modules"][0]["version"] == [2, 1, 9]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
+          assert resource_manifest["header"]["uuid"] == "a6e65709-b8e3-4b6f-88e3-6fc5a83fda23"
+          assert resource_manifest["modules"][0]["type"] == "resources"
+          assert any(dep.get("uuid") == resource_manifest["header"]["uuid"] for dep in manifest["dependencies"])
+          for asset in ("pack_icon.png", "textures/ui/zp_logo.png", "textures/ui/anticheat_shield.png", "textures/ui/credit.png", "textures/ui/report.png", "textures/ui/menu.png"):
+              assert Path("resource_pack", asset).is_file(), asset
           assert project["project"]["version"] == "0.6.9"
           assert 'version = "0.6.9"' in plugin
           assert 'command: "zp_ac:ba"' in script
@@ -132,12 +138,23 @@ jobs:
         run: |
           test "$(find dist -maxdepth 1 -name '*.mcaddon' | wc -l)" -eq 1
           test "$(find dist -maxdepth 1 -name '*.whl' | wc -l)" -eq 1
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+          addon = next(Path("dist").glob("*.mcaddon"))
+          with zipfile.ZipFile(addon) as z:
+              names = set(z.namelist())
+              assert "behavior_pack/manifest.json" in names
+              assert "resource_pack/manifest.json" in names
+              assert "resource_pack/textures/ui/credit.png" in names
+          print("Behavior pack + resource pack archive validation passed.")
+          PY
           ls -lh dist/
 
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v4
         with:
-          name: ZP-AC-2.1.8-and-Endstone-0.6.9
+          name: ZP-AC-2.1.9-and-Endstone-0.6.9
           path: |
             dist/*.mcaddon
             dist/*.whl

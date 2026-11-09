@@ -6,11 +6,11 @@ import sys
 import zipfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
-ADDON_DIR = ROOT / "mcaddon"
-ADDON_OUTPUT = DIST / "ZP-AC-2.1.8.mcaddon"
+BP_DIR = ROOT / "mcaddon"
+RP_DIR = ROOT / "resource_pack"
+ADDON_OUTPUT = DIST / "ZP-AC-2.1.9.mcaddon"
 WHEEL_PATTERN = "endstone_zp_report_anticheat-0.6.9-*.whl"
 
 
@@ -20,8 +20,15 @@ def main() -> int:
     DIST.mkdir(parents=True)
 
     required = [
-        ADDON_DIR / "manifest.json",
-        ADDON_DIR / "scripts" / "main.js",
+        BP_DIR / "manifest.json",
+        BP_DIR / "scripts" / "main.js",
+        RP_DIR / "manifest.json",
+        RP_DIR / "pack_icon.png",
+        RP_DIR / "textures" / "ui" / "zp_logo.png",
+        RP_DIR / "textures" / "ui" / "anticheat_shield.png",
+        RP_DIR / "textures" / "ui" / "credit.png",
+        RP_DIR / "textures" / "ui" / "report.png",
+        RP_DIR / "textures" / "ui" / "menu.png",
         ROOT / "plugins" / "endstone_zp_anticheat" / "plugin.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "policy.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "credit.py",
@@ -34,7 +41,6 @@ def main() -> int:
     if missing:
         raise SystemExit("Missing release input(s): " + ", ".join(missing))
 
-    # compileall in CI must not leak __pycache__ files into the distributable wheel.
     for cache_dir in ROOT.rglob("__pycache__"):
         if cache_dir.is_dir():
             shutil.rmtree(cache_dir, ignore_errors=True)
@@ -50,9 +56,22 @@ def main() -> int:
         check=True,
     )
 
+    # A single .mcaddon contains two independently manifested packs.
     with zipfile.ZipFile(ADDON_OUTPUT, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        archive.write(ADDON_DIR / "manifest.json", "manifest.json")
-        archive.write(ADDON_DIR / "scripts" / "main.js", "scripts/main.js")
+        for source in BP_DIR.rglob("*"):
+            if source.is_file():
+                archive.write(source, Path("behavior_pack") / source.relative_to(BP_DIR))
+        for source in RP_DIR.rglob("*"):
+            if source.is_file():
+                archive.write(source, Path("resource_pack") / source.relative_to(RP_DIR))
+
+    with zipfile.ZipFile(ADDON_OUTPUT) as archive:
+        names = set(archive.namelist())
+        assert "behavior_pack/manifest.json" in names
+        assert "behavior_pack/scripts/main.js" in names
+        assert "resource_pack/manifest.json" in names
+        assert "resource_pack/pack_icon.png" in names
+        assert "resource_pack/textures/ui/zp_logo.png" in names
 
     wheels = sorted(DIST.glob(WHEEL_PATTERN))
     if len(wheels) != 1:
