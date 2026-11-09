@@ -115,6 +115,13 @@ class LocalBehaviorAI:
             # Do not immediately learn extreme observations; this limits baseline poisoning.
             if not anomalous or all(item[0] != key for item in anomalous):
                 history.append(value)
+        groups = {
+            "move_speed_mean": "movement", "move_speed_peak": "movement",
+            "combat_rate": "combat", "target_diversity": "combat",
+            "ore_ratio": "mining", "click_cv": "input",
+            "scaffold_rate": "building",
+        }
+        anomalous_groups = {groups.get(item[0], item[0]) for item in anomalous}
         if len(anomalous_groups) < self.min_features:
             return None
         previous = self.last_alert.get(player_id, 0.0)
