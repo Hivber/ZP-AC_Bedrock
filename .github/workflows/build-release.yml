@@ -47,11 +47,11 @@ jobs:
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
-          assert manifest["header"]["version"] == [2, 1, 4]
-          assert manifest["modules"][0]["version"] == [2, 1, 4]
+          assert manifest["header"]["version"] == [2, 1, 5]
+          assert manifest["modules"][0]["version"] == [2, 1, 5]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.6.2"
-          assert 'version = "0.6.2"' in plugin
+          assert project["project"]["version"] == "0.6.3"
+          assert 'version = "0.6.3"' in plugin
           assert 'command: "zp_ac:ba"' in script
           assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
           assert "playerreport:ba" not in script
@@ -59,9 +59,12 @@ jobs:
           assert "zp:ac_admin_request" in plugin and "zp:ac_admin_response" in plugin
           assert config["behavior_pack_bridge_enabled"] is True
           checks = config["anti_cheat_checks"]
-          assert set(checks) == {"speed", "flight", "reach", "combat", "autoclick", "scaffold", "fast_break"}
+          assert set(checks) == {"speed", "flight", "reach", "combat", "autoclick", "scaffold", "fast_break", "xray"}
           assert all(value is True for value in checks.values())
           assert "反作弊检测功能开关" in script
+          assert "矿物透视 / 异常定向采矿检测" in script
+          assert "xray_mining_pattern" in plugin
+          assert config["anti_cheat_checks"]["xray"] is True
           assert '.toggle(rows[0][1], { defaultValue: isCheckEnabled("speed") })' in script
           assert not re.search(r"\.toggle\(rows\[\d+\]\[1\], isCheckEnabled", script)
           assert 'action == "set_checks"' in plugin
@@ -84,7 +87,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v4
         with:
-          name: ZP-AC-2.1.4-and-Endstone-0.6.2
+          name: ZP-AC-2.1.5-and-Endstone-0.6.3
           path: |
             dist/*.mcaddon
             dist/*.whl
