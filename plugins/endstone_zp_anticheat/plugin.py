@@ -945,7 +945,6 @@ class ZPReportAntiCheat(Plugin):
                 return True
             profile = self._profile_for_uuid(player_uuid)
             score = clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT))
-            threshold = float(self.cfg.get("public_credit_lock_threshold", PUBLIC_CREDIT_LOCK_THRESHOLD))
             # Player-facing command intentionally exposes only the public score.
             sender.send_message(f"§8[§bZP信用§8] §f公开信用分：§e{score:.1f}/100")
             return True
