@@ -231,7 +231,7 @@ class ZPReportAntiCheat(Plugin):
 
         self.sessions: dict[str, dict[str, Any]] = {}
         self.ai_engine = LocalBehaviorAI(window_seconds=float(self.cfg.get("ai_window_seconds", 120.0)), min_samples=int(self.cfg.get("ai_min_baseline_samples", 12)), threshold=float(self.cfg.get("ai_anomaly_threshold", 3.5)), min_features=int(self.cfg.get("ai_min_anomalous_features", 2)), max_players=max(100, int(self.cfg.get("profile_limit", 10000))))
-        self._ai_last_analysis = 0.0
+        self._ai_last_analysis: dict[str, float] = {}
         self.report_cooldowns: dict[tuple[str, str], float] = {}
         self.packet_second: dict[str, dict[str, Any]] = {}
         self.break_events: dict[str, deque[float]] = defaultdict(deque)
@@ -2161,10 +2161,10 @@ class ZPReportAntiCheat(Plugin):
         if not bool(self.cfg.get("ai_enabled", True)) or self._is_exempt(player):
             return
         interval = max(2.0, min(60.0, float(self.cfg.get("ai_analysis_interval_seconds", 5.0))))
-        if now - self._ai_last_analysis < interval:
-            return
-        self._ai_last_analysis = now
         player_uuid = session.get("target_uuid") or ""
+        if now - self._ai_last_analysis.get(player_uuid, 0.0) < interval:
+            return
+        self._ai_last_analysis[player_uuid] = now
         result = self.ai_engine.analyze(player_uuid, now)
         if not result:
             return
