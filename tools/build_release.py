@@ -10,8 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 ADDON_DIR = ROOT / "mcaddon"
-ADDON_OUTPUT = DIST / "ZP-AC-2.1.6.mcaddon"
-WHEEL_PATTERN = "endstone_zp_report_anticheat-0.6.6-*.whl"
+ADDON_OUTPUT = DIST / "ZP-AC-2.1.7.mcaddon"
+WHEEL_PATTERN = "endstone_zp_report_anticheat-0.6.7-*.whl"
 
 
 def main() -> int:
