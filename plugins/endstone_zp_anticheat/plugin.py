@@ -38,6 +38,7 @@ from endstone.plugin import Plugin
 from .ai.engine import LocalBehaviorAI
 from .movement import read_effect_amplifier, speed_effect_multiplier
 from .policy import has_independent_strong_evidence, profile_penalty
+from .credit import PUBLIC_CREDIT_DEFAULT, PUBLIC_CREDIT_LOCK_THRESHOLD, can_damage_players, clamp_public_credit, recover_public_credit
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -164,8 +165,9 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.7"
+    version = "0.6.8"
     commands = {
+        "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
             "usages": [
@@ -178,7 +180,11 @@ class ZPReportAntiCheat(Plugin):
         "zp_report_anticheat.admin": {
             "description": "允许管理 ZP 反作弊、云端同步及确认永久封禁。",
             "default": True,
-        }
+        },
+        "zp_report_anticheat.credit": {
+            "description": "允许玩家使用 /zp 查看自己的公开信用分。",
+            "default": True,
+        },
     }
 
     def on_enable(self) -> None:
@@ -194,6 +200,16 @@ class ZPReportAntiCheat(Plugin):
             "cloud_timeout_seconds": 4,
             "trust_enabled": True,
             "trust_initial_score": 50.0,
+            "public_credit_enabled": True,
+            "public_credit_initial_score": 100.0,
+            "public_credit_recovery_per_hour": 0.5,
+            "public_credit_recovery_delay_seconds": 3600,
+            "public_credit_lock_threshold": 70.0,
+            "public_credit_cheat_penalty": 12.0,
+            "public_credit_assault_window_seconds": 20.0,
+            "public_credit_assault_hits_required": 8,
+            "public_credit_assault_penalty": 5.0,
+            "public_credit_assault_cooldown_seconds": 600.0,
             "trust_recovery_per_hour": 0.25,
             "trust_recovery_delay_seconds": 3600,
             "risk_decay_per_hour": 0.20,
@@ -240,6 +256,9 @@ class ZPReportAntiCheat(Plugin):
         self.packet_second: dict[str, dict[str, Any]] = {}
         self.break_events: dict[str, deque[float]] = defaultdict(deque)
         self.click_events: dict[str, deque[float]] = defaultdict(deque)
+        self.pvp_recent_hits: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+        self.pvp_penalty_cooldowns: dict[tuple[str, str], float] = {}
+        self.pvp_message_cooldowns: dict[str, float] = {}
         self.audit_path = Path(self.data_folder) / "evidence.jsonl"
         self.data_path = Path(self.data_folder)
         self.data_path.mkdir(parents=True, exist_ok=True)
@@ -550,6 +569,8 @@ class ZPReportAntiCheat(Plugin):
                         rules = {}
                     profiles[key] = {
                         "trust": max(0.0, min(100.0, float(item.get("trust", 50.0)))),
+                        "public_credit": clamp_public_credit(item.get("public_credit", PUBLIC_CREDIT_DEFAULT)),
+                        "last_credit_penalty_at": max(0.0, float(item.get("last_credit_penalty_at", 0.0))),
                         "risk": max(0.0, min(100.0, float(item.get("risk", 0.0)))),
                         "flags": max(0, int(item.get("flags", 0))),
                         "strong_flags": max(0, int(item.get("strong_flags", 0))),
@@ -580,6 +601,8 @@ class ZPReportAntiCheat(Plugin):
             initial = max(0.0, min(100.0, float(self.cfg.get("trust_initial_score", 50.0))))
             profile = {
                 "trust": initial,
+                "public_credit": clamp_public_credit(self.cfg.get("public_credit_initial_score", PUBLIC_CREDIT_DEFAULT)),
+                "last_credit_penalty_at": 0.0,
                 "risk": 0.0,
                 "flags": 0,
                 "strong_flags": 0,
@@ -602,6 +625,8 @@ class ZPReportAntiCheat(Plugin):
                 continue
             profiles[normalized] = {
                 "trust": round(max(0.0, min(100.0, float(item.get("trust", 50.0)))), 2),
+                "public_credit": round(clamp_public_credit(item.get("public_credit", PUBLIC_CREDIT_DEFAULT)), 2),
+                "last_credit_penalty_at": float(item.get("last_credit_penalty_at", 0.0)),
                 "risk": round(max(0.0, min(100.0, float(item.get("risk", 0.0)))), 2),
                 "flags": max(0, int(item.get("flags", 0))),
                 "strong_flags": max(0, int(item.get("strong_flags", 0))),
