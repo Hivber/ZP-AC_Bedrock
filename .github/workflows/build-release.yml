@@ -55,8 +55,8 @@ jobs:
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
-          assert manifest["header"]["version"] == [2, 1, 6]
-          assert manifest["modules"][0]["version"] == [2, 1, 6]
+          assert manifest["header"]["version"] == [2, 1, 7]
+          assert manifest["modules"][0]["version"] == [2, 1, 7]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
           assert project["project"]["version"] == "0.6.7"
           assert 'version = "0.6.7"' in plugin
