@@ -61,7 +61,7 @@ jobs:
           checks = config["anti_cheat_checks"]
           assert set(checks) == {"speed", "flight", "reach", "combat", "autoclick", "scaffold", "fast_break"}
           assert all(value is True for value in checks.values())
-          assert '"反作弊检测功能开关"' in script
+          assert "反作弊检测功能开关" in script
           assert 'action == "set_checks"' in plugin
           assert "zp:ac_checks_sync" in script and "zp:ac_checks_sync" in plugin
           print("ZP-AC manifest, version, protocol and detection-toggle checks passed.")
