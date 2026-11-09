@@ -90,6 +90,21 @@ risk_decay_delay_seconds = 3600
 profile_save_interval_seconds = 60
 profile_limit = 10000
 
+# 公开信用分：与隐藏可信分独立。玩家只能通过 /zp 查看自己的分数。
+public_credit_enabled = true
+public_credit_initial_score = 100.0
+public_credit_recovery_per_hour = 0.5
+public_credit_recovery_delay_seconds = 3600
+# 严格按“低于 70 分”限制 PvP；70 分本身仍可攻击玩家。
+public_credit_lock_threshold = 70.0
+# 仅高置信度强规则会扣公开信用分；弱辅助线索和 AI 线索不扣分。
+public_credit_cheat_penalty = 12.0
+# 短时间内对同一玩家持续单方面造成伤害，才视为破坏秩序。
+public_credit_assault_window_seconds = 20.0
+public_credit_assault_hits_required = 8
+public_credit_assault_penalty = 5.0
+public_credit_assault_cooldown_seconds = 600.0
+
 # 自动踢出额外要求持久化风险分达到该门槛；不满足时只生成待复核记录并通知管理员。
 auto_kick_risk_threshold = 22.0
 # 自动踢出至少需要两个不同的高置信度检测规则；弱辅助线索不能凑数。
