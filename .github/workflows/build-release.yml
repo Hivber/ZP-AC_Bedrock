@@ -97,7 +97,7 @@ jobs:
           assert 'if action == "credit":' in plugin
           assert 'send_action_bar("§c信用分过低")' in plugin
           assert "public_credit_recovery_seconds" in plugin
-          assert "Exclude offline and server downtime" in plugin
+          assert "Time spent offline" in plugin
           assert "public_credit_retaliation_seconds" in config
           assert "test_recovery_progress_survives_restart" in Path("tests/test_public_credit.py").read_text(encoding="utf-8")
           assert "test_retaliation_only_applies_to_same_attacker_within_five_seconds" in Path("tests/test_public_credit.py").read_text(encoding="utf-8")
