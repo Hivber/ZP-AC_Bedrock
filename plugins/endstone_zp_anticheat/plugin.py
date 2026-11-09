@@ -58,12 +58,13 @@ BP_RULE_MAP = {
 }
 DEFAULT_ANTI_CHEAT_CHECKS = {
     "speed": True, "flight": True, "reach": True, "combat": True,
-    "autoclick": True, "scaffold": True, "fast_break": True,
+    "autoclick": True, "scaffold": True, "fast_break": True, "xray": True,
 }
 RULE_CHECK_GROUP = {
     "speed_sustained": "speed", "hover_confirmed": "flight",
     "reach_extreme": "reach", "reach_repeated": "reach",
     "multi_target_combat": "combat", "rapid_block_break": "fast_break",
+    "xray_mining_pattern": "xray",
     "autoclick_pattern": "autoclick", "scaffold_pattern": "scaffold",
 }
 ADMIN_TAGS = {"zp_ac_admin", "zp:ac_admin", BP_OP_ADMIN_TAG}
@@ -76,6 +77,7 @@ RULE_TITLES = {
     "reach_repeated": "重复出现超出正常范围的近战命中",
     "multi_target_combat": "短时间内异常连续攻击多个玩家",
     "rapid_block_break": "短时间内异常密集破坏方块（辅助线索）",
+    "xray_mining_pattern": "异常矿物定向开采模式（透视辅助线索）",
     "autoclick_pattern": "异常规律的高频左键操作（辅助线索）",
     "scaffold_pattern": "移动中连续在脚下/身侧放置方块（疑似自动搭路，辅助线索）",
 }
@@ -87,6 +89,7 @@ BASE_POINTS = {
     "reach_repeated": 4,
     "multi_target_combat": 7,
     "rapid_block_break": 3,
+    "xray_mining_pattern": 3,
     "autoclick_pattern": 2,
     "scaffold_pattern": 2,
 }
@@ -156,7 +159,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.2"
+    version = "0.6.3"
     commands = {
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
@@ -198,6 +201,13 @@ class ZPReportAntiCheat(Plugin):
             "ping_speed_window_bonus": 1,
             "reach_ping_allowance_scale": 0.0010,
             "reach_ping_allowance_max": 0.90,
+            "xray_window_seconds": 180.0,
+            "xray_min_rock_blocks": 40,
+            "xray_min_ore_blocks": 5,
+            "xray_min_rare_ores": 2,
+            "xray_min_clusters": 3,
+            "xray_min_ore_ratio": 0.08,
+            "xray_cluster_distance": 5.5,
         }
         changed = False
         for key, value in defaults.items():
@@ -442,6 +452,7 @@ class ZPReportAntiCheat(Plugin):
             "packet_second_start": int(now),
             "break_counted_until": 0.0,
             "scaffold_events": deque(),
+            "xray_mining_events": deque(),
             "kicked": False,
             "autonomous": False,
         }
@@ -1701,9 +1712,89 @@ class ZPReportAntiCheat(Plugin):
         player = event.player
         key = _player_key(player)
         session = self.sessions.get(key or "")
-        if session is None or session["kicked"] or self._is_exempt(player) or not self._check_enabled("fast_break"):
+        if (
+            session is None
+            or session["kicked"]
+            or self._is_exempt(player)
+            or bool(getattr(event, "is_cancelled", False))
+        ):
             return
+
         now = time.monotonic()
+
+        # Server-authoritative ore/rock mining sequence analysis. Weak evidence only.
+        if self._check_enabled("xray"):
+            try:
+                block = event.block
+                block_type = str(block.type).lower().split(":")[-1]
+                ore_types = {
+                    "coal_ore", "deepslate_coal_ore", "copper_ore", "deepslate_copper_ore",
+                    "iron_ore", "deepslate_iron_ore", "gold_ore", "deepslate_gold_ore",
+                    "redstone_ore", "deepslate_redstone_ore", "lapis_ore", "deepslate_lapis_ore",
+                    "diamond_ore", "deepslate_diamond_ore", "emerald_ore",
+                    "deepslate_emerald_ore", "ancient_debris",
+                }
+                rock_tokens = (
+                    "stone", "deepslate", "netherrack", "blackstone", "basalt",
+                    "tuff", "granite", "diorite", "andesite", "calcite", "gravel",
+                )
+                is_ore = block_type in ore_types
+                is_rock = any(token in block_type for token in rock_tokens)
+                if is_ore or is_rock:
+                    mining = session.setdefault("xray_mining_events", deque())
+                    dimension = self._dimension_key(player)
+                    mining.append((
+                        now, dimension, int(block.x), int(block.y), int(block.z),
+                        block_type, "ore" if is_ore else "rock",
+                    ))
+                    window = max(30.0, float(self.cfg.get("xray_window_seconds", 180.0)))
+                    while mining and now - mining[0][0] > window:
+                        mining.popleft()
+
+                    recent = [row for row in mining if row[1] == dimension]
+                    ore_rows = [row for row in recent if row[6] == "ore"]
+                    rock_count = sum(1 for row in recent if row[6] == "rock")
+                    ore_count = len(ore_rows)
+                    rare_names = {
+                        "diamond_ore", "deepslate_diamond_ore",
+                        "emerald_ore", "deepslate_emerald_ore", "ancient_debris",
+                    }
+                    rare_count = sum(1 for row in ore_rows if row[5] in rare_names)
+                    anchors: list[tuple[float, float, float]] = []
+                    cluster_distance = max(3.0, float(self.cfg.get("xray_cluster_distance", 5.5)))
+                    for row in ore_rows:
+                        point = (float(row[2]), float(row[3]), float(row[4]))
+                        if all(_distance(point, anchor) > cluster_distance for anchor in anchors):
+                            anchors.append(point)
+
+                    total_mined = ore_count + rock_count
+                    ore_ratio = ore_count / total_mined if total_mined else 0.0
+                    enough_evidence = (
+                        rock_count >= int(self.cfg.get("xray_min_rock_blocks", 40))
+                        and ore_count >= int(self.cfg.get("xray_min_ore_blocks", 5))
+                        and rare_count >= int(self.cfg.get("xray_min_rare_ores", 2))
+                        and len(anchors) >= int(self.cfg.get("xray_min_clusters", 3))
+                        and ore_ratio >= float(self.cfg.get("xray_min_ore_ratio", 0.08))
+                    )
+                    if enough_evidence:
+                        self._flag(
+                            player,
+                            session,
+                            "xray_mining_pattern",
+                            (
+                                f"最近 {window:.0f} 秒挖掘 {rock_count} 个岩石类方块、"
+                                f"{ore_count} 个矿物方块（高价值矿物 {rare_count} 个），"
+                                f"分布约 {len(anchors)} 个独立矿脉，矿物占比 {ore_ratio:.1%}。"
+                                "这是异常定向采矿辅助线索；洞穴、矿脉密集区、效率工具和地图生成均可能造成相似结果。"
+                            ),
+                            high_confidence=False,
+                        )
+                        mining.clear()
+            except Exception as exc:
+                self.logger.debug(f"矿物透视行为分析跳过一次方块事件: {exc}")
+
+        if not self._check_enabled("fast_break"):
+            return
         events = self.break_events[key]
         events.append(now)
         window = float(self.cfg.get("rapid_break_window_seconds", 2.0))
