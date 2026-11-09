@@ -12,7 +12,7 @@ import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/serve
 
 /*
  * ZP-AC Bedrock Core | Minecraft Bedrock 1.26.60
- * Behavior Pack 2.1.3 | @minecraft/server 2.10.0
+ * Behavior Pack 2.1.4 | @minecraft/server 2.10.0
  *
  * Design:
  * - Standalone mode: this behavior pack continuously monitors online players,
@@ -966,7 +966,7 @@ function showAdminStatus(player) {
   if (!isUiAdmin(player)) return;
   const body =
     "§l§f运行状态\n" +
-    "§f行为包版本：§e2.1.2\n" +
+    "§f行为包版本：§e2.1.4\n" +
     "§f插件桥接：§" + (isPluginOnline() ? "a已连接" : "e未连接/独立运行") + "\n" +
     "§f在线玩家：§e" + world.getPlayers().length + "\n" +
     "§f活跃监控会话：§e" + sessions.size + "\n" +
@@ -1124,13 +1124,13 @@ function showDetectionSettings(player) {
   ];
   const form = new ModalFormData()
     .title("§l反作弊检测功能开关")
-    .toggle(rows[0][1], isCheckEnabled("speed"))
-    .toggle(rows[1][1], isCheckEnabled("flight"))
-    .toggle(rows[2][1], isCheckEnabled("reach"))
-    .toggle(rows[3][1], isCheckEnabled("combat"))
-    .toggle(rows[4][1], isCheckEnabled("autoclick"))
-    .toggle(rows[5][1], isCheckEnabled("scaffold"))
-    .toggle(rows[6][1], isCheckEnabled("fast_break"))
+    .toggle(rows[0][1], { defaultValue: isCheckEnabled("speed") })
+    .toggle(rows[1][1], { defaultValue: isCheckEnabled("flight") })
+    .toggle(rows[2][1], { defaultValue: isCheckEnabled("reach") })
+    .toggle(rows[3][1], { defaultValue: isCheckEnabled("combat") })
+    .toggle(rows[4][1], { defaultValue: isCheckEnabled("autoclick") })
+    .toggle(rows[5][1], { defaultValue: isCheckEnabled("scaffold") })
+    .toggle(rows[6][1], { defaultValue: isCheckEnabled("fast_break") })
     .submitButton("§l§a保存检测配置");
 
   form.show(player).then((result) => {
