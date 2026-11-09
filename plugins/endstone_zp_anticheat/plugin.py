@@ -36,6 +36,7 @@ from endstone.event import (
 from endstone.plugin import Plugin
 
 from .ai.engine import LocalBehaviorAI
+from .movement import read_effect_amplifier, speed_effect_multiplier
 from .policy import has_independent_strong_evidence, profile_penalty
 
 
@@ -163,7 +164,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.6"
+    version = "0.6.7"
     commands = {
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
@@ -1529,17 +1530,35 @@ class ZPReportAntiCheat(Plugin):
             return
 
         speed = session["move_window_distance"] / max(0.05, elapsed)
-        if bool(self.cfg.get("ai_enabled", True)):
-            self.ai_engine.observe(key or "", "move_speed", speed, now)
         session["move_window_start"] = now
         session["move_window_distance"] = 0.0
         try:
             grounded = bool(player.is_on_ground)
-            swimming = bool(player.is_in_water)
+            swimming = bool(player.is_in_water) or bool(getattr(player, "is_swimming", False))
+            in_lava = bool(player.is_in_lava)
             flying = bool(player.is_flying)
             gliding = bool(getattr(player, "is_gliding", False))
+            allow_flight = bool(getattr(player, "allow_flight", False))
         except Exception:
-            grounded, swimming, flying, gliding = False, False, False, False
+            # 状态 API 不可用时不猜测玩家处于正常移动状态：清空窗口并跳过本次处罚判断。
+            session["speed_windows"] = 0
+            return
+
+        speed_amplifier = read_effect_amplifier(player, "speed")
+        levitation_amplifier = read_effect_amplifier(player, "levitation")
+        slow_falling_amplifier = read_effect_amplifier(player, "slow_falling")
+        if None in (speed_amplifier, levitation_amplifier, slow_falling_amplifier):
+            session["speed_windows"] = 0
+            return
+        potion_factor = speed_effect_multiplier(speed_amplifier)
+        special_movement = (
+            swimming or in_lava or flying or gliding or allow_flight
+            or levitation_amplifier >= 0 or slow_falling_amplifier >= 0
+        )
+        comparable_ground_movement = grounded and not special_movement
+        if bool(self.cfg.get("ai_enabled", True)) and comparable_ground_movement:
+            # 先按速度药水等级归一化，再送入个人基线，避免药水状态污染 AI。
+            self.ai_engine.observe(key or "", "move_speed", speed / potion_factor, now)
 
         tier = self._tier(len(session["reporters"]))
         base_threshold = self._tier_value("speed_thresholds", tier, [16.5, 15.5, 14.5, 13.5])
@@ -1555,8 +1574,8 @@ class ZPReportAntiCheat(Plugin):
         ping_start = max(0, int(self.cfg.get("ping_speed_threshold_start", 150)))
         ping_scale = max(0.0, float(self.cfg.get("ping_speed_threshold_scale", 0.00045)))
         ping_factor = 1.0 + min(0.25, max(0, ping - ping_start) * ping_scale)
-        threshold = base_threshold * custom_speed_factor * ping_factor
-        if grounded and not swimming and not flying and not gliding and speed >= threshold:
+        threshold = base_threshold * custom_speed_factor * ping_factor * potion_factor
+        if comparable_ground_movement and speed >= threshold:
             session["speed_windows"] += 1
             required = int(self._tier_value("speed_windows_required", tier, [3, 3, 3, 2]))
             if ping >= 250:
@@ -1568,7 +1587,7 @@ class ZPReportAntiCheat(Plugin):
                     session,
                     "speed_sustained",
                     f"连续 {session['speed_windows']} 个移动窗口超出阈值；当前 {speed:.1f} 格/秒，基础阈值 {base_threshold:.1f}，"
-                    f"延迟修正阈值 {threshold:.1f}；玩家 ping={ping}ms，行走速度系数={custom_speed_factor:.2f}。",
+                    f"延迟修正阈值 {threshold:.1f}；玩家 ping={ping}ms，行走速度系数={custom_speed_factor:.2f}，速度药水倍率={potion_factor:.2f}。",
                     high_confidence=extreme,
                 )
                 session["speed_windows"] = 0
@@ -2231,7 +2250,7 @@ class ZPReportAntiCheat(Plugin):
             session["air_since"] = None
             return
         try:
-            in_water = bool(player.is_in_water)
+            in_water = bool(player.is_in_water) or bool(getattr(player, "is_swimming", False))
             in_lava = bool(player.is_in_lava)
             on_ground = bool(player.is_on_ground)
             flying = bool(player.is_flying)
@@ -2242,9 +2261,24 @@ class ZPReportAntiCheat(Plugin):
             vx = float(velocity.x)
             vz = float(velocity.z)
         except Exception:
+            session["air_since"] = None
+            session["air_start_y"] = None
+            session["air_start_xz"] = None
             return
-        # 快速水平滑翔/鞘翅移动不作为悬浮证据。
-        if in_water or in_lava or on_ground or flying or gliding or allow_flight or math.hypot(vx, vz) > 7.0:
+        levitation_amplifier = read_effect_amplifier(player, "levitation")
+        slow_falling_amplifier = read_effect_amplifier(player, "slow_falling")
+        jump_amplifier = read_effect_amplifier(player, "jump_boost")
+        if None in (levitation_amplifier, slow_falling_amplifier, jump_amplifier):
+            session["air_since"] = None
+            session["air_start_y"] = None
+            session["air_start_xz"] = None
+            return
+        # 鞘翅、漂浮、缓降、跳跃提升、水中/岩浆及高速滑翔均不进入悬浮判定。
+        if (
+            in_water or in_lava or on_ground or flying or gliding or allow_flight
+            or levitation_amplifier >= 0 or slow_falling_amplifier >= 0
+            or jump_amplifier >= 0 or math.hypot(vx, vz) > 7.0
+        ):
             session["air_since"] = None
             session["air_start_y"] = None
             return
