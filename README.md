@@ -1,8 +1,9 @@
 # ZP-AC Bedrock
 
-ZP-AC 是一套面向 Minecraft Bedrock 1.26.60 的反作弊系统，采用**一个行为包 + 一个 Endstone 增强插件**的交付结构。
+ZP-AC 是一套面向 Minecraft Bedrock 1.26.60 的反作弊系统，采用**一个 `.mcaddon`（内含行为包与资源包）+ 一个 Endstone 增强插件**的交付结构。
 
 - 行为包：2.1.9。无插件时独立运行，负责基础行为采样、本地历史记录、举报 UI、管理员面板和可配置检测开关。
+- 配套资源包：1.0.0。提供 ZP-AC 品牌标志、盾牌、信用分、举报及菜单纹理，与行为包一起包含在单一 `.mcaddon` 中；当前作为可复用纹理素材，不会自动改写原版 ActionForm 样式。
 - Endstone 增强插件：0.6.9。提供服务端原生事件检测、UUID 持久化画像、风险关联、待复核候选、可选自动踢出、人工确认永久封禁和可选云端 UUID 同步。
 - 云端功能默认关闭；云端仅同步 UUID，不上传玩家名称、XUID、可信分、风险分或证据正文。
 
@@ -76,7 +77,7 @@ python -m compileall -q plugins/endstone_zp_anticheat
 python tools/build_release.py
 ```
 
-构建产物输出到 `dist/`，包含一个 `.mcaddon` 和一个 `.whl`。GitHub Actions 会在 main 分支更新后自动执行静态检查并上传这两个成品。
+构建产物输出到 `dist/`，包含一个同时含有 `behavior_pack/` 与 `resource_pack/` 两个独立包目录的 `.mcaddon`，以及一个 `.whl`。GitHub Actions 会在 main 分支更新后自动执行静态检查并上传这两个成品。
 
 ## 验收边界
 
