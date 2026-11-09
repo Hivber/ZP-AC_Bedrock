@@ -36,6 +36,11 @@ def is_retaliation_allowed(last_hit_at: object, now: object, window_seconds: obj
     return last_hit > 0.0 and 0.0 <= current - last_hit <= window
 
 
+def should_count_pvp_hit(is_retaliation: object) -> bool:
+    """Retaliatory hits are reciprocal combat, not harassment evidence."""
+    return not bool(is_retaliation)
+
+
 def accrue_public_credit(
     score: object,
     recovery_progress_seconds: object,
