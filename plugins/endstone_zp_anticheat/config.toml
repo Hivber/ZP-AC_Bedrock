@@ -18,6 +18,8 @@ quiet_stop_seconds = 90
 maximum_monitor_seconds = 600
 offline_grace_seconds = 8
 teleport_grace_seconds = 3
+# 玩家死亡重生后的移动采样宽限时间；避免出生点重定位污染速度/搭路窗口。
+spawn_grace_seconds = 5.0
 
 # 不同举报人数对应的自动踢出分数门槛。
 # 举报人数越多门槛越低，但仍要求至少两种检测规则和一项强证据。
