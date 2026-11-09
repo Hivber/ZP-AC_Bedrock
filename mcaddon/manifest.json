@@ -2,12 +2,12 @@
   "format_version": 2,
   "header": {
     "name": "ZP-AC 反作弊（独立运行 + Endstone 增强 + 举报）",
-    "description": "单一行为包：无插件时独立基础检测；安装 Endstone 增强插件时自动桥接增强；内置 /ba 举报 UI。",
+    "description": "单一行为包：无插件时独立基础检测；安装 Endstone 增强插件时自动桥接增强；内置 /ba 综合菜单（信用分与举报）。",
     "uuid": "a8c93fd8-8e7e-43a3-99e0-53b177df2f24",
     "version": [
       2,
       1,
-      7
+      8
     ],
     "min_engine_version": [
       1,
@@ -23,7 +23,7 @@
       "version": [
         2,
         1,
-        7
+        8
       ],
       "entry": "scripts/main.js"
     }
