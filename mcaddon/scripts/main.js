@@ -76,7 +76,7 @@ const CONFIG = Object.freeze({
 
 const DETECTION_CHECK_DEFAULTS = Object.freeze({
   speed: true, flight: true, reach: true, combat: true,
-  autoclick: true, scaffold: true, fast_break: true
+  autoclick: true, scaffold: true, fast_break: true, xray: true
 });
 const BP_RULE_CHECK = Object.freeze({
   large_displacement: "speed", speed: "speed",
@@ -1120,7 +1120,8 @@ function showDetectionSettings(player) {
     ["combat", "§f多目标连续攻击检测"],
     ["autoclick", "§f高频连点器行为检测"],
     ["scaffold", "§f自动搭路 / 脚边放置检测"],
-    ["fast_break", "§f快速破坏方块检测 §8（仅 Endstone 增强层）"]
+    ["fast_break", "§f快速破坏方块检测 §8（仅 Endstone 增强层）"],
+    ["xray", "§f矿物透视 / 异常定向采矿检测 §8（仅 Endstone 增强层）"]
   ];
   const form = new ModalFormData()
     .title("§l反作弊检测功能开关")
@@ -1131,6 +1132,7 @@ function showDetectionSettings(player) {
     .toggle(rows[4][1], { defaultValue: isCheckEnabled("autoclick") })
     .toggle(rows[5][1], { defaultValue: isCheckEnabled("scaffold") })
     .toggle(rows[6][1], { defaultValue: isCheckEnabled("fast_break") })
+    .toggle(rows[7][1], { defaultValue: isCheckEnabled("xray") })
     .submitButton("§l§a保存检测配置");
 
   form.show(player).then((result) => {
