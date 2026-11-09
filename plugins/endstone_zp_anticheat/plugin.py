@@ -28,6 +28,7 @@ from endstone.event import (
     PlayerLoginEvent,
     PlayerMoveEvent,
     PlayerQuitEvent,
+    PlayerRespawnEvent,
     PlayerTeleportEvent,
     ScriptMessageEvent,
     event_handler,
@@ -50,7 +51,7 @@ BP_CHECKS_PROTOCOL = "zp-ac-checks-v1"
 BP_OP_ADMIN_TAG = "zp_ac_op_admin"
 BP_PROTOCOL = "zp-ac-bp-v1"
 BP_RULE_MAP = {
-    "speed": ("speed_sustained", True),
+    "speed": ("speed_sustained", False),
     "hover": ("hover_confirmed", True),
     "ascending": ("hover_confirmed", False),
     "reach_hard": ("reach_repeated", False),
@@ -162,7 +163,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.5"
+    version = "0.6.6"
     commands = {
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
@@ -448,7 +449,7 @@ class ZPReportAntiCheat(Plugin):
             "evidence": [],
             "last_position": loc,
             "last_dimension": self._dimension_key(target),
-            "teleport_until": now + 1.0,
+            "teleport_until": now + max(3.0, float(self.cfg.get("spawn_grace_seconds", 5.0))),
             "move_window_start": now,
             "move_window_distance": 0.0,
             "speed_windows": 0,
@@ -1596,6 +1597,29 @@ class ZPReportAntiCheat(Plugin):
         session["teleport_until"] = now + float(self.cfg.get("teleport_grace_seconds", 3))
 
     @event_handler
+    def on_player_respawn(self, event: PlayerRespawnEvent) -> None:
+        """Respawn relocates a player; discard the old movement/scaffold sample window."""
+        player = event.player
+        session = self.sessions.get(_player_key(player) or "")
+        if session is None:
+            return
+        now = time.monotonic()
+        pos = _xyz(getattr(player, "location", None)) or session.get("last_position") or (0.0, 0.0, 0.0)
+        grace = max(3.0, float(self.cfg.get("spawn_grace_seconds", 5.0)))
+        self._reset_motion(session, pos, self._dimension_key(player), now)
+        session["teleport_until"] = now + grace
+        for name in ("scaffold_events", "reach_soft", "reach_hard", "combat_hits"):
+            values = session.get(name)
+            if values is not None:
+                values.clear()
+        self._log(
+            "movement_baseline_reset",
+            target_uuid=session.get("target_uuid"),
+            reason="player_respawn",
+            grace_seconds=grace,
+        )
+
+    @event_handler
     def on_dimension_change(self, event: PlayerDimensionChangeEvent) -> None:
         player = event.player
         session = self.sessions.get(_player_key(player) or "")
@@ -2314,7 +2338,7 @@ class ZPReportAntiCheat(Plugin):
         key = _player_key(event.player)
         if key and key in self.sessions:
             self.sessions[key]["offline_since"] = None
-            self.sessions[key]["teleport_until"] = time.monotonic() + 3.0
+            self.sessions[key]["teleport_until"] = time.monotonic() + max(3.0, float(self.cfg.get("spawn_grace_seconds", 5.0)))
         self._ensure_autonomous_session(event.player)
         if key and bool(self.cfg.get("cloud_enabled", False)):
             with self._state_lock:
