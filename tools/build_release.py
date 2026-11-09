@@ -24,6 +24,7 @@ def main() -> int:
         ADDON_DIR / "scripts" / "main.js",
         ROOT / "plugins" / "endstone_zp_anticheat" / "plugin.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "config.toml",
+        ROOT / "plugins" / "endstone_zp_anticheat" / "ai" / "engine.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "__init__.py",
     ]
     missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]
