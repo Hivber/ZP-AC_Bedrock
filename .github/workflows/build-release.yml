@@ -52,7 +52,7 @@ jobs:
           plugin = Path("plugins/endstone_zp_anticheat/plugin.py").read_text(encoding="utf-8")
           ai_engine = Path("plugins/endstone_zp_anticheat/ai/engine.py").read_text(encoding="utf-8")
           policy = Path("plugins/endstone_zp_anticheat/policy.py").read_text(encoding="utf-8")
-credit = Path("plugins/endstone_zp_anticheat/credit.py").read_text(encoding="utf-8")
+          credit = Path("plugins/endstone_zp_anticheat/credit.py").read_text(encoding="utf-8")
           movement = Path("plugins/endstone_zp_anticheat/movement.py").read_text(encoding="utf-8")
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
