@@ -2354,7 +2354,7 @@ class ZPReportAntiCheat(Plugin):
         key = _player_key(event.player)
         if key and key in self.sessions:
             self.sessions[key]["offline_since"] = None
-            self.sessions[key]["teleport_until"] = time.monotonic() + 3.0
+            self.sessions[key]["teleport_until"] = time.monotonic() + max(3.0, float(self.cfg.get("spawn_grace_seconds", 5.0)))
         self._ensure_autonomous_session(event.player)
         if key and bool(self.cfg.get("cloud_enabled", False)):
             with self._state_lock:
