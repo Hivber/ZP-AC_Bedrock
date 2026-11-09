@@ -57,8 +57,8 @@ jobs:
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
-          assert manifest["header"]["version"] == [2, 1, 7]
-          assert manifest["modules"][0]["version"] == [2, 1, 7]
+          assert manifest["header"]["version"] == [2, 1, 8]
+          assert manifest["modules"][0]["version"] == [2, 1, 8]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
           assert project["project"]["version"] == "0.7.0"
           assert 'version = "0.7.0"' in plugin
@@ -99,7 +99,7 @@ jobs:
           assert "public_credit_recovery_seconds" in plugin
           assert "Time spent offline" in plugin
           assert "public_credit_retaliation_seconds" in config
-          assert "function openPlayerHubMenu(player)" in bp
+          assert "function openPlayerHubMenu(player)" in script
           assert ".button(\"§l§a查看我的信用分" in bp
           assert ".button(\"§l§c举报其他玩家" in bp
           assert 'name: "ba"' in plugin
@@ -138,7 +138,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v4
         with:
-          name: ZP-AC-2.1.7-and-Endstone-0.7.0
+          name: ZP-AC-2.1.8-and-Endstone-0.7.0
           path: |
             dist/*.mcaddon
             dist/*.whl
