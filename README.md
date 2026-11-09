@@ -113,3 +113,10 @@ AI 默认本地运行且无需 API Key。配置中的 ai_api_enabled、ai_api_ke
 - AI 移动速度特征只采集可比较的地面移动窗口，并按速度药水倍率归一化；鞘翅、飞行、游泳、岩浆、漂浮、缓降和允许飞行状态不混入个人移动基线。
 - 悬浮检测排除鞘翅、漂浮、缓降和跳跃提升；状态 API 无法可靠读取时，本次移动/悬浮判定采取跳过策略，不猜测玩家没有效果。
 - 跳跃提升不会触发持续异常上升线索。灵魂疾行、激流、击退等特殊移动仍需进一步验证，未可靠识别前不将其描述为已完整支持。
+
+
+## ONNX 推理与行为数据采集
+
+Endstone 增强层提供可选 ONNX Runtime CPU 推理适配器。默认加载插件数据目录下 `models/zp_ac_behavior.onnx`，也可用 `ai_onnx_model_path` 指定。安装依赖：`python -m pip install ".[onnx]"`。模型输入为 float32 `[N,7]`，顺序为 move_speed_mean、move_speed_peak、combat_rate、target_diversity、ore_ratio、click_cv、scaffold_rate；单输出解释为异常概率，多输出取最后一项作为异常类别分数。缺少模型/依赖/模型格式不符时，ONNX 自动停用，原统计引擎继续工作。
+
+数据采集默认开启，写入插件数据目录 `ai_dataset.jsonl`，每名玩家每 30 秒最多一条样本。记录包含 SHA-256 派生匿名 player_key、时间戳、数值特征和空标签，不保存玩家名、UUID、XUID或聊天内容；文件到达大小上限时轮转为 .1。样本必须人工审核标注：`python tools/label_ai_dataset.py <ai_dataset.jsonl> <64位player_key> normal|cheat`。当前仓库提供推理和数据采集/标注管线，**不包含已训练的生产模型**。ONNX 分数只通知管理员，不改变信用分、风险分或处罚状态。

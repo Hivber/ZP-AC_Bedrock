@@ -98,6 +98,14 @@ class LocalBehaviorAI:
         scale = max(scale, abs(median) * 0.05, 0.01)
         return abs(value - median) / scale
 
+    def snapshot(self, player_id: str, now: float | None = None) -> dict[str, float] | None:
+        """Return current model features without updating personal baselines."""
+        timestamp = time.monotonic() if now is None else float(now)
+        events = self.events.get(player_id)
+        if not events:
+            return None
+        return dict(self._features(events, timestamp))
+
     def analyze(self, player_id: str, now: float | None = None) -> dict[str, Any] | None:
         timestamp = time.monotonic() if now is None else float(now)
         events = self.events.get(player_id)

@@ -9,6 +9,9 @@ description = "ZP-AC Endstone enhancement plugin for Minecraft Bedrock 1.26.60"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "ZP Server Tools" }]
+
+[project.optional-dependencies]
+onxx = ["onnxruntime>=1.18", "numpy>=1.24"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
