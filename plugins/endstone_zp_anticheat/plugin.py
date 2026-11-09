@@ -1719,17 +1719,31 @@ class ZPReportAntiCheat(Plugin):
     def on_actor_damage(self, event: ActorDamageEvent) -> None:
         reach_enabled = self._check_enabled("reach")
         combat_enabled = self._check_enabled("combat")
-        if not reach_enabled and not combat_enabled:
-            return
         try:
-            source = event.damage_source
-            if bool(source.is_indirect):
+            if bool(getattr(event, "is_cancelled", False)):
                 return
+            source = event.damage_source
             attacker = source.damaging_actor
             victim = event.actor
             attacker_key = _player_key(attacker)
             victim_key = _player_key(victim)
             if not attacker_key or not victim_key or attacker_key == victim_key:
+                return
+            if bool(self.cfg.get("public_credit_enabled", True)) and not self._is_exempt(attacker):
+                attacker_profile = self._profile_for_uuid(attacker_key)
+                credit = clamp_public_credit(attacker_profile.get("public_credit", PUBLIC_CREDIT_DEFAULT))
+                threshold = float(self.cfg.get("public_credit_lock_threshold", PUBLIC_CREDIT_LOCK_THRESHOLD))
+                if not can_damage_players(credit, threshold, False):
+                    event.is_cancelled = True
+                    now_message = time.monotonic()
+                    if now_message - self.pvp_message_cooldowns.get(attacker_key, 0.0) >= 2.0:
+                        attacker.send_message(f"§c[ZP信用系统] 你的信用分为 {credit:.1f}，低于 {threshold:.0f} 分，暂时不能攻击其他玩家。使用 /zp 查看详情。")
+                        self.pvp_message_cooldowns[attacker_key] = now_message
+                    return
+                self._record_public_pvp_hit(attacker_key, victim_key)
+            if not reach_enabled and not combat_enabled:
+                return
+            if bool(source.is_indirect):
                 return
             session = self.sessions.get(attacker_key)
             if session is None or session["kicked"]:
@@ -1813,6 +1827,43 @@ class ZPReportAntiCheat(Plugin):
                 session["combat_hits"].clear()
         except Exception as exc:
             self.logger.warning(f"处理攻击事件失败: {exc}")
+
+    def _record_public_pvp_hit(self, attacker_uuid: str, victim_uuid: str) -> None:
+        """Penalize repeated one-sided PvP harassment, not reciprocal combat."""
+        now = time.monotonic()
+        window = max(5.0, float(self.cfg.get("public_credit_assault_window_seconds", 20.0)))
+        pair = (attacker_uuid, victim_uuid)
+        reverse = (victim_uuid, attacker_uuid)
+        hits = self.pvp_recent_hits[pair]
+        hits.append(now)
+        while hits and now - hits[0] > window:
+            hits.popleft()
+        reverse_hits = self.pvp_recent_hits.get(reverse, deque())
+        while reverse_hits and now - reverse_hits[0] > window:
+            reverse_hits.popleft()
+        required = max(3, int(self.cfg.get("public_credit_assault_hits_required", 8)))
+        cooldown = max(window, float(self.cfg.get("public_credit_assault_cooldown_seconds", 600.0)))
+        if len(hits) < required or reverse_hits or now - self.pvp_penalty_cooldowns.get(pair, 0.0) < cooldown:
+            return
+        profile = self._profile_for_uuid(attacker_uuid)
+        if profile is None:
+            return
+        penalty = max(0.0, float(self.cfg.get("public_credit_assault_penalty", 5.0)))
+        after = max(0.0, clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT)) - penalty)
+        profile["public_credit"] = after
+        profile["last_credit_penalty_at"] = time.time()
+        self._profiles_dirty = True
+        self.pvp_penalty_cooldowns[pair] = now
+        hits.clear()
+        self._log("public_credit_penalty", target_uuid=attacker_uuid, victim_uuid=victim_uuid,
+                  source="repeated_one_sided_pvp", hit_count=required, penalty=round(penalty, 2),
+                  public_credit=round(after, 2))
+        attacker = next((p for p in list(self.server.online_players) if _player_key(p) == attacker_uuid), None)
+        if attacker is not None:
+            try:
+                attacker.send_message(f"§e[ZP信用系统] 检测到短时间内持续单方面攻击玩家，信用分降低 {penalty:.1f} 分。当前信用分：{after:.1f}/100。")
+            except Exception:
+                pass
 
     @staticmethod
     def _prune_deque(items: deque, cutoff: float) -> None:
