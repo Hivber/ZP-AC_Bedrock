@@ -9,6 +9,8 @@ anti_cheat_checks = { speed = true, flight = true, reach = true, combat = true, 
 # 自动踢出只由多项独立行为证据触发；举报数量本身不会触发踢出。
 
 auto_kick = true
+# 自动踢出至少需要两个不同强证据领域（例如移动 + 战斗）。同领域多条规则或弱证据不算独立佐证。
+auto_kick_min_strong_domains = 2
 
 # 监控生命周期（秒）
 minimum_monitor_seconds = 60
