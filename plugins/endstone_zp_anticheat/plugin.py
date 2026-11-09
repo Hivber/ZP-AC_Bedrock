@@ -658,6 +658,11 @@ class ZPReportAntiCheat(Plugin):
             profile["risk"] = min(100.0, float(profile.get("risk", 0.0)) + risk_delta)
             profile["trust"] = max(0.0, float(profile.get("trust", 50.0)) - trust_delta)
             profile["last_flag_at"] = time.time()
+            if bool(self.cfg.get("public_credit_enabled", True)) and code in STRONG_RULES:
+                penalty = max(0.0, float(self.cfg.get("public_credit_cheat_penalty", 12.0)))
+                profile["public_credit"] = max(0.0, clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT)) - penalty)
+                profile["last_credit_penalty_at"] = time.time()
+                self._log("public_credit_penalty", target_uuid=player_uuid, source="high_confidence_anticheat", rule=code, penalty=round(penalty, 2), public_credit=round(profile["public_credit"], 2))
         # 弱证据仍计入审计次数，但不惩罚持久风险/可信画像，也不重置画像恢复计时。
         profile["flags"] = int(profile.get("flags", 0)) + 1
         profile["last_rule"] = code
@@ -680,6 +685,13 @@ class ZPReportAntiCheat(Plugin):
             profile["active_seconds"] = float(profile.get("active_seconds", 0.0)) + delta
             trust_rate = max(0.0, float(self.cfg.get("trust_recovery_per_hour", 0.25)))
             profile["trust"] = min(100.0, float(profile.get("trust", 50.0)) + delta * trust_rate / 3600.0)
+        if delta > 0 and bool(self.cfg.get("public_credit_enabled", True)):
+            profile["public_credit"] = recover_public_credit(
+                profile.get("public_credit", PUBLIC_CREDIT_DEFAULT), delta,
+                float(self.cfg.get("public_credit_recovery_per_hour", 0.5)),
+                now_epoch - float(profile.get("last_credit_penalty_at", 0.0)),
+                float(self.cfg.get("public_credit_recovery_delay_seconds", 3600)),
+            )
         if delta > 0 and now_epoch - last_flag >= max(0.0, float(self.cfg.get("risk_decay_delay_seconds", 3600))):
             risk_rate = max(0.0, float(self.cfg.get("risk_decay_per_hour", 0.20)))
             profile["risk"] = max(0.0, float(profile.get("risk", 0.0)) - delta * risk_rate / 3600.0)
@@ -908,6 +920,24 @@ class ZPReportAntiCheat(Plugin):
             self._start_cloud_sync("admin_enable")
 
     def on_command(self, sender: CommandSender, command: Command, args: list[str]) -> bool:
+        if command.name == "zp":
+            if isinstance(sender, ConsoleCommandSender):
+                sender.send_message("§e/zp 只能由在线玩家执行。")
+                return True
+            player = self._find_online_player(_clean(getattr(sender, "name", ""), 64))
+            player_uuid = _player_key(player) if player is not None else None
+            if not player_uuid:
+                sender.send_message("§c无法读取你的玩家 UUID，暂时无法查询信用分。")
+                return True
+            profile = self._profile_for_uuid(player_uuid)
+            score = clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT))
+            threshold = float(self.cfg.get("public_credit_lock_threshold", PUBLIC_CREDIT_LOCK_THRESHOLD))
+            status = f"§c低于 {threshold:.0f} 分：暂时无法攻击其他玩家。" if score < threshold else "§a正常：可以参与玩家间战斗。"
+            sender.send_message(
+                f"§8[§bZP 信用系统§8] §f你的公开信用分：§e{score:.1f}/100\\n"
+                f"§7长期正常在线游戏可逐步恢复；严重违规或确认的作弊行为会降低分数。\\n{status}"
+            )
+            return True
         if command.name != "zpac":
             return True
         if not self._is_admin_sender(sender):
