@@ -34,6 +34,8 @@ from endstone.event import (
 )
 from endstone.plugin import Plugin
 
+from .ai.engine import LocalBehaviorAI
+
 
 MESSAGE_ID = "zp:report_submitted"
 REPORT_VERSION = "zp-report-v1"
@@ -159,7 +161,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.3"
+    version = "0.6.4"
     commands = {
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
@@ -208,6 +210,15 @@ class ZPReportAntiCheat(Plugin):
             "xray_min_clusters": 3,
             "xray_min_ore_ratio": 0.08,
             "xray_cluster_distance": 5.5,
+            "ai_enabled": True,
+            "ai_window_seconds": 120.0,
+            "ai_analysis_interval_seconds": 5.0,
+            "ai_min_baseline_samples": 12,
+            "ai_anomaly_threshold": 3.5,
+            "ai_min_anomalous_features": 2,
+            "ai_api_enabled": False,
+            "ai_api_key": "",
+            "ai_api_endpoint": "",
         }
         changed = False
         for key, value in defaults.items():
@@ -219,6 +230,8 @@ class ZPReportAntiCheat(Plugin):
         self.cfg = dict(self.config)
 
         self.sessions: dict[str, dict[str, Any]] = {}
+        self.ai_engine = LocalBehaviorAI(window_seconds=float(self.cfg.get("ai_window_seconds", 120.0)), min_samples=int(self.cfg.get("ai_min_baseline_samples", 12)), threshold=float(self.cfg.get("ai_anomaly_threshold", 3.5)), min_features=int(self.cfg.get("ai_min_anomalous_features", 2)), max_players=max(100, int(self.cfg.get("profile_limit", 10000))))
+        self._ai_last_analysis: dict[str, float] = {}
         self.report_cooldowns: dict[tuple[str, str], float] = {}
         self.packet_second: dict[str, dict[str, Any]] = {}
         self.break_events: dict[str, deque[float]] = defaultdict(deque)
@@ -1519,6 +1532,8 @@ class ZPReportAntiCheat(Plugin):
             return
 
         speed = session["move_window_distance"] / max(0.05, elapsed)
+        if bool(self.cfg.get("ai_enabled", True)):
+            self.ai_engine.observe(key or "", "move_speed", speed, now)
         session["move_window_start"] = now
         session["move_window_distance"] = 0.0
         try:
@@ -1650,6 +1665,9 @@ class ZPReportAntiCheat(Plugin):
 
             if combat_enabled:
                 session["combat_hits"].append((now, victim_key, _player_name(victim), distance))
+                if bool(self.cfg.get("ai_enabled", True)):
+                    self.ai_engine.observe(attacker_key, "combat_hit", 1.0, now)
+                    self.ai_engine.observe(attacker_key, "combat_target", float(hash(victim_key) % 1000000), now)
                 self._prune_deque(session["combat_hits"], now - 5.0)
 
             if reach_enabled and distance >= hard:
@@ -1747,6 +1765,8 @@ class ZPReportAntiCheat(Plugin):
                         now, dimension, int(block.x), int(block.y), int(block.z),
                         block_type, "ore" if is_ore else "rock",
                     ))
+                    if bool(self.cfg.get("ai_enabled", True)):
+                        self.ai_engine.observe(key or "", "ore" if is_ore else "rock", 1.0, now)
                     window = max(30.0, float(self.cfg.get("xray_window_seconds", 180.0)))
                     while mining and now - mining[0][0] > window:
                         mining.popleft()
@@ -1831,6 +1851,8 @@ class ZPReportAntiCheat(Plugin):
 
         now = time.monotonic()
         clicks = self.click_events[key]
+        if clicks and bool(self.cfg.get("ai_enabled", True)):
+            self.ai_engine.observe(key or "", "click_interval", now - clicks[-1], now)
         clicks.append(now)
         window = float(self.cfg.get("autoclick_window_seconds", 2.5))
         while clicks and now - clicks[0] > window:
@@ -1883,6 +1905,8 @@ class ZPReportAntiCheat(Plugin):
         now = time.monotonic()
         events = session["scaffold_events"]
         events.append((now, block_loc, player_loc))
+        if bool(self.cfg.get("ai_enabled", True)):
+            self.ai_engine.observe(key or "", "scaffold_place", 1.0, now)
         window = float(self.cfg.get("scaffold_window_seconds", 3.5))
         while events and now - events[0][0] > window:
             events.popleft()
@@ -2110,6 +2134,7 @@ class ZPReportAntiCheat(Plugin):
             session["offline_since"] = None
             session["last_seen"] = now
             self._sample_air_state(player, session, now)
+            self._run_ai_analysis(player, session, now)
             if session["kicked"]:
                 continue
 
@@ -2130,6 +2155,33 @@ class ZPReportAntiCheat(Plugin):
                 self._end_session(key, session, "maximum_time")
             elif elapsed >= min_seconds and quiet >= quiet_seconds:
                 self._end_session(key, session, "clean")
+
+    def _run_ai_analysis(self, player: Any, session: dict[str, Any], now: float) -> None:
+        """Run local review-only behavior analysis; never changes risk or punishment state."""
+        if not bool(self.cfg.get("ai_enabled", True)) or self._is_exempt(player):
+            return
+        interval = max(2.0, min(60.0, float(self.cfg.get("ai_analysis_interval_seconds", 5.0))))
+        player_uuid = session.get("target_uuid") or ""
+        if now - self._ai_last_analysis.get(player_uuid, 0.0) < interval:
+            return
+        self._ai_last_analysis[player_uuid] = now
+        result = self.ai_engine.analyze(player_uuid, now)
+        if not result:
+            return
+        self._admin_alert(
+            f"§d本地 AI 行为分析线索§r：§e{_player_name(player)}§r；"
+            f"{result['feature_count']} 项行为特征同时偏离个人基线。仅供管理员复核，不构成作弊结论。"
+        )
+        self._log(
+            "ai_behavior_anomaly",
+            target_uuid=player_uuid,
+            model="local_robust_baseline_v1",
+            window_seconds=result["window_seconds"],
+            baseline_samples=result["baseline_samples"],
+            feature_count=result["feature_count"],
+            features=result["features"],
+            action="review_only_no_risk_no_punishment",
+        )
 
     def _sample_air_state(self, player: Any, session: dict[str, Any], now: float) -> None:
         if not self._check_enabled("flight"):

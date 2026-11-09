@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -31,7 +34,10 @@ jobs:
         run: node --check --input-type=module < mcaddon/scripts/main.js
 
       - name: Check Python syntax
-        run: python -m compileall -q plugins/endstone_zp_anticheat tools
+        run: python -m compileall -q plugins/endstone_zp_anticheat tools tests
+
+      - name: Test local AI behavior engine
+        run: python -m unittest discover -s tests -v
 
       - name: Validate manifest, protocols and versions
         run: |
@@ -44,14 +50,15 @@ jobs:
           manifest = json.loads(Path("mcaddon/manifest.json").read_text(encoding="utf-8"))
           script = Path("mcaddon/scripts/main.js").read_text(encoding="utf-8")
           plugin = Path("plugins/endstone_zp_anticheat/plugin.py").read_text(encoding="utf-8")
+          ai_engine = Path("plugins/endstone_zp_anticheat/ai/engine.py").read_text(encoding="utf-8")
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
           assert manifest["header"]["version"] == [2, 1, 5]
           assert manifest["modules"][0]["version"] == [2, 1, 5]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.6.3"
-          assert 'version = "0.6.3"' in plugin
+          assert project["project"]["version"] == "0.6.4"
+          assert 'version = "0.6.4"' in plugin
           assert 'command: "zp_ac:ba"' in script
           assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
           assert "playerreport:ba" not in script
@@ -64,6 +71,9 @@ jobs:
           assert "反作弊检测功能开关" in script
           assert "矿物透视 / 异常定向采矿检测" in script
           assert "xray_mining_pattern" in plugin
+          assert "LocalBehaviorAI" in plugin
+          assert "def analyze(" in ai_engine
+          assert "ai_api_enabled = false" in Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8")
           assert config["anti_cheat_checks"]["xray"] is True
           assert '.toggle(rows[0][1], { defaultValue: isCheckEnabled("speed") })' in script
           assert not re.search(r"\.toggle\(rows\[\d+\]\[1\], isCheckEnabled", script)
@@ -87,7 +97,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v4
         with:
-          name: ZP-AC-2.1.5-and-Endstone-0.6.3
+          name: ZP-AC-2.1.5-and-Endstone-0.6.4
           path: |
             dist/*.mcaddon
             dist/*.whl

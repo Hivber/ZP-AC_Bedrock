@@ -107,3 +107,17 @@ xray_min_rare_ores = 2
 xray_min_clusters = 3
 xray_min_ore_ratio = 0.08
 xray_cluster_distance = 5.5
+
+ 
+# 本地 AI 行为分析：无需第三方依赖，默认启用；只生成管理员复核线索。
+ai_enabled = true
+ai_window_seconds = 120.0
+ai_analysis_interval_seconds = 5.0
+ai_min_baseline_samples = 12
+ai_anomaly_threshold = 3.5
+ai_min_anomalous_features = 2
+
+# 可选外部 AI 接口预留：默认关闭；当前版本不会调用外部 API。
+ai_api_enabled = false
+ai_api_key = ""
+ai_api_endpoint = ""
