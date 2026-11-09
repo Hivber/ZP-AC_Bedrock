@@ -36,6 +36,8 @@ from endstone.event import (
 from endstone.plugin import Plugin
 
 from .ai.engine import LocalBehaviorAI
+from .ai.dataset import BehaviorDatasetCollector
+from .ai.onnx_engine import OnnxBehaviorModel
 from .movement import read_effect_amplifier, speed_effect_multiplier
 from .policy import has_independent_strong_evidence, profile_penalty
 from .credit import PUBLIC_CREDIT_DEFAULT, PUBLIC_CREDIT_LOCK_THRESHOLD, accrue_public_credit, can_damage_players, clamp_public_credit, is_retaliation_allowed, should_count_pvp_hit
@@ -251,6 +253,16 @@ class ZPReportAntiCheat(Plugin):
 
         self.sessions: dict[str, dict[str, Any]] = {}
         self.ai_engine = LocalBehaviorAI(window_seconds=float(self.cfg.get("ai_window_seconds", 120.0)), min_samples=int(self.cfg.get("ai_min_baseline_samples", 12)), threshold=float(self.cfg.get("ai_anomaly_threshold", 3.5)), min_features=int(self.cfg.get("ai_min_anomalous_features", 2)), max_players=max(100, int(self.cfg.get("profile_limit", 10000))))
+        self.ai_model = OnnxBehaviorModel(
+            self.cfg.get("ai_onnx_model_path") or (Path(self.data_folder) / "models" / "zp_ac_behavior.onnx"),
+            enabled=bool(self.cfg.get("ai_onnx_enabled", True)),
+        )
+        self.ai_dataset = BehaviorDatasetCollector(
+            Path(self.data_folder) / "ai_dataset.jsonl",
+            enabled=bool(self.cfg.get("ai_dataset_enabled", True)),
+            interval_seconds=float(self.cfg.get("ai_dataset_interval_seconds", 30.0)),
+            max_bytes=int(self.cfg.get("ai_dataset_max_bytes", 20000000)),
+        )
         self._ai_last_analysis: dict[str, float] = {}
         self.report_cooldowns: dict[tuple[str, str], float] = {}
         self.packet_second: dict[str, dict[str, Any]] = {}
@@ -2383,6 +2395,13 @@ class ZPReportAntiCheat(Plugin):
         if now - self._ai_last_analysis.get(player_uuid, 0.0) < interval:
             return
         self._ai_last_analysis[player_uuid] = now
+        feature_vector = self.ai_engine.snapshot(player_uuid, now)
+        if feature_vector:
+            self.ai_dataset.record(player_uuid, feature_vector)
+            onnx_result = self.ai_model.predict(feature_vector)
+            if onnx_result and onnx_result["score"] >= float(self.cfg.get("ai_onnx_review_threshold", 0.90)):
+                self._admin_alert(f"§dONNX 行为模型审核线索§r：§e{_player_name(player)}§r；模型异常分数 {onnx_result['score']:.3f}。仅供管理员复核。")
+                self._log("ai_onnx_review", target_uuid=player_uuid, model=onnx_result["model"], score=onnx_result["score"], action="review_only_no_risk_no_punishment")
         result = self.ai_engine.analyze(player_uuid, now)
         if not result:
             return

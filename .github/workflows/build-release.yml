@@ -86,6 +86,11 @@ jobs:
           assert "矿物透视 / 异常定向采矿检测" in script
           assert "xray_mining_pattern" in plugin
           assert "LocalBehaviorAI" in plugin
+          assert "OnnxBehaviorModel" in plugin
+          assert "BehaviorDatasetCollector" in plugin
+          assert "def snapshot(" in ai_engine
+          assert "ai_dataset_enabled" in Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8")
+          assert "FEATURE_ORDER" in Path("plugins/endstone_zp_anticheat/ai/onnx_engine.py").read_text(encoding="utf-8")
           assert "has_independent_strong_evidence" in plugin
           assert '"speed": ("speed_sustained", False)' in plugin
           assert "def on_player_respawn(" in plugin

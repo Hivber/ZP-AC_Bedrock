@@ -51,6 +51,8 @@ def main() -> int:
         ROOT / "plugins" / "endstone_zp_anticheat" / "movement.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "config.toml",
         ROOT / "plugins" / "endstone_zp_anticheat" / "ai" / "engine.py",
+        ROOT / "plugins" / "endstone_zp_anticheat" / "ai" / "onnx_engine.py",
+        ROOT / "plugins" / "endstone_zp_anticheat" / "ai" / "dataset.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "__init__.py",
     ]
     missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]

@@ -140,3 +140,13 @@ ai_min_anomalous_features = 2
 ai_api_enabled = false
 ai_api_key = ""
 ai_api_endpoint = ""
+
+# 可选本地 ONNX 模型；模型文件放入插件数据目录 models/zp_ac_behavior.onnx
+ai_onnx_enabled = true
+ai_onnx_model_path = ""
+ai_onnx_review_threshold = 0.90
+
+# 行为数据采集，输出匿名 player_key 与数值特征，不记录玩家名称/UUID。
+ai_dataset_enabled = true
+ai_dataset_interval_seconds = 30.0
+ai_dataset_max_bytes = 20000000

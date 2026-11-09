@@ -11,6 +11,13 @@ LocalBehaviorAI = MODULE.LocalBehaviorAI
 
 
 class LocalBehaviorAITests(unittest.TestCase):
+    def test_snapshot_exposes_seven_features(self):
+        engine = LocalBehaviorAI()
+        engine.observe('p', 'move_speed', 2.0, 1000.0)
+        snapshot = engine.snapshot('p', 1000.0)
+        self.assertEqual(len(snapshot), 7)
+        self.assertEqual(snapshot['move_speed_mean'], 2.0)
+
     def test_requires_personal_baseline_before_flagging(self):
         engine = LocalBehaviorAI(window_seconds=60, min_samples=6, threshold=3.0)
         player = "00000000-0000-0000-0000-000000000001"
