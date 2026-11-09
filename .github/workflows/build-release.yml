@@ -55,11 +55,11 @@ jobs:
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           config = tomllib.loads(Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8"))
 
-          assert manifest["header"]["version"] == [2, 1, 5]
-          assert manifest["modules"][0]["version"] == [2, 1, 5]
+          assert manifest["header"]["version"] == [2, 1, 6]
+          assert manifest["modules"][0]["version"] == [2, 1, 6]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.6.5"
-          assert 'version = "0.6.5"' in plugin
+          assert project["project"]["version"] == "0.6.6"
+          assert 'version = "0.6.6"' in plugin
           assert 'command: "zp_ac:ba"' in script
           assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
           assert "playerreport:ba" not in script
@@ -74,6 +74,12 @@ jobs:
           assert "xray_mining_pattern" in plugin
           assert "LocalBehaviorAI" in plugin
           assert "has_independent_strong_evidence" in plugin
+          assert '"speed": ("speed_sustained", False)' in plugin
+          assert "def on_player_respawn(" in plugin
+          assert "PlayerRespawnEvent" in plugin
+          assert config["spawn_grace_seconds"] == 5.0
+          assert "world.afterEvents.playerSpawn.subscribe" in script
+          assert "SPAWN_GRACE_TICKS" in script
           assert "auto_kick_min_strong_rules" in config
           assert "def has_independent_strong_evidence" in policy
           assert "def analyze(" in ai_engine
@@ -101,7 +107,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v4
         with:
-          name: ZP-AC-2.1.5-and-Endstone-0.6.5
+          name: ZP-AC-2.1.6-and-Endstone-0.6.6
           path: |
             dist/*.mcaddon
             dist/*.whl

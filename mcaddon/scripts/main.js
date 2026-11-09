@@ -12,7 +12,7 @@ import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/serve
 
 /*
  * ZP-AC Bedrock Core | Minecraft Bedrock 1.26.60
- * Behavior Pack 2.1.4 | @minecraft/server 2.10.0
+ * Behavior Pack 2.1.6 | @minecraft/server 2.10.0
  *
  * Design:
  * - Standalone mode: this behavior pack continuously monitors online players,
@@ -39,6 +39,7 @@ const CONFIG = Object.freeze({
   PROTOCOL: "zp-ac-bp-v1",
 
   SAMPLE_INTERVAL: 5,
+  SPAWN_GRACE_TICKS: 20 * 5,
   DISCONNECT_GRACE_TICKS: 20 * 8,
   ALERT_COOLDOWN_TICKS: 20 * 30,
   PLUGIN_LEASE_TICKS: 20 * 90,
@@ -288,6 +289,7 @@ function createSession(player) {
     reportIds: [],
     lastLocation: { x: loc.x, y: loc.y, z: loc.z },
     lastSampleTick: tickCounter,
+    movementGraceUntil: tickCounter + CONFIG.SPAWN_GRACE_TICKS,
     speedStrikes: 0,
     hoverTicks: 0,
     hoverTravel: 0,
@@ -410,6 +412,17 @@ function sampleMovement(player, session) {
     session.hoverTicks = 0;
     session.hoverTravel = 0;
     session.ascendTicks = 0;
+    session.movementGraceUntil = tickCounter + CONFIG.SPAWN_GRACE_TICKS;
+    return;
+  }
+
+  if (tickCounter < (session.movementGraceUntil || 0)) {
+    session.lastLocation = { x: location.x, y: location.y, z: location.z };
+    session.lastSampleTick = tickCounter;
+    session.speedStrikes = 0;
+    session.hoverTicks = 0;
+    session.hoverTravel = 0;
+    session.ascendTicks = 0;
     return;
   }
 
@@ -429,6 +442,7 @@ function sampleMovement(player, session) {
     session.hoverTicks = 0;
     session.hoverTravel = 0;
     session.ascendTicks = 0;
+    session.movementGraceUntil = tickCounter + 20 * 3;
   } else {
     if (isCheckEnabled("speed")) {
       const speedBoost = hasEffect(player, "speed");
@@ -575,7 +589,7 @@ function trackPlace(event) {
   const player = event.player;
   if (!player || player.typeId !== "minecraft:player" || !isCheckEnabled("scaffold")) return;
   const session = getSession(player);
-  if (!session) return;
+  if (!session || tickCounter < (session.movementGraceUntil || 0)) return;
 
   let blockLocation;
   try { blockLocation = event.block.location; } catch { return; }
@@ -740,6 +754,21 @@ function monitoringLoop() {
 }
 
 system.afterEvents.scriptEventReceive.subscribe(handleScriptEvent);
+world.afterEvents.playerSpawn.subscribe((event) => {
+  const player = event.player;
+  const session = sessions.get(player.id);
+  if (!session) return;
+  const location = player.location;
+  session.lastLocation = { x: location.x, y: location.y, z: location.z };
+  session.lastSampleTick = tickCounter;
+  session.movementGraceUntil = tickCounter + CONFIG.SPAWN_GRACE_TICKS;
+  session.speedStrikes = 0;
+  session.hoverTicks = 0;
+  session.hoverTravel = 0;
+  session.ascendTicks = 0;
+  session.scaffoldEvents = [];
+});
+
 world.afterEvents.entityHitEntity.subscribe(trackHit);
 world.afterEvents.playerSwingStart.subscribe(trackSwing);
 world.afterEvents.playerPlaceBlock.subscribe(trackPlace);
