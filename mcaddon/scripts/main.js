@@ -867,6 +867,34 @@ function submitReportToEndstone(reporter, target, reason, reportId) {
     }
 }
 
+function openPlayerHubMenu(player) {
+    const form = new ActionFormData()
+        .title("§l§b综合服务菜单")
+        .body("§7ZP 玩家服务中心\n\n§f请选择需要使用的功能：")
+        .button("§l§a查看我的信用分\n§7仅显示你自己的公开信用分")
+        .button("§l§c举报其他玩家\n§7提交玩家行为举报");
+    form.show(player).then(response => {
+        if (response.canceled || response.selection === undefined) return;
+        if (response.selection === 0) {
+            // The Endstone command returns only the caller's public score.
+            try {
+                const result = player.runCommand("zp");
+                if (result && result.successCount === 0) {
+                    sendMessage(player, "§c暂时无法读取信用分，请确认增强插件已启动。");
+                }
+            } catch (error) {
+                console.warn("[ZP-AC] 打开公开信用分失败: " + error);
+                sendMessage(player, "§c信用分服务暂不可用，请稍后重试。");
+            }
+        } else if (response.selection === 1) {
+            openReportMenu(player);
+        }
+    }).catch(error => {
+        console.warn("[ZP-AC] 综合服务菜单打开失败: " + error);
+        sendMessage(player, "§c综合菜单暂时无法打开，请稍后重试。");
+    });
+}
+
 function openReportMenu(player) {
     const targets = getAvailableTargets(player);
     if (targets.length === 0) {
@@ -1475,7 +1503,7 @@ system.beforeEvents.startup.subscribe((event) => {
   const registrations = [
     {
       name: REPORT_UI_CONFIG.command,
-      description: "打开玩家举报系统",
+      description: "打开 ZP 玩家综合服务菜单",
       permissionLevel: CommandPermissionLevel.Any,
       cheatsRequired: false
     },
@@ -1488,7 +1516,7 @@ system.beforeEvents.startup.subscribe((event) => {
   ];
 
   const handlers = {
-    [REPORT_UI_CONFIG.command]: (player) => openReportMenu(player),
+    [REPORT_UI_CONFIG.command]: (player) => openPlayerHubMenu(player),
     [ADMIN_UI_COMMAND]: (player) => showAdminPanel(player)
   };
 
