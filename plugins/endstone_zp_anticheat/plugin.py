@@ -35,6 +35,7 @@ from endstone.event import (
 from endstone.plugin import Plugin
 
 from .ai.engine import LocalBehaviorAI
+from .policy import independent_strong_domain_count
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -161,7 +162,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.4"
+    version = "0.6.5"
     commands = {
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
@@ -467,6 +468,7 @@ class ZPReportAntiCheat(Plugin):
             "scaffold_events": deque(),
             "xray_mining_events": deque(),
             "kicked": False,
+            "auto_kick_deferred_independent_domains": False,
             "autonomous": False,
         }
 
@@ -2027,10 +2029,38 @@ class ZPReportAntiCheat(Plugin):
         if not session["strong_codes"]:
             return
 
+        # 关闭自动踢出时仍保留原有管理员复核候选流程。
+        if not bool(self.cfg.get("auto_kick", True)):
+            self._remember_ban_candidate(session)
+            return
+
+        # A weak clue (for example scaffold) must never turn one strong movement
+        # signal into a kick. Require independent strong evidence from separate
+        # behavior domains: movement AND combat, not two rules from one domain.
+        minimum_domains = max(2, min(4, int(self.cfg.get("auto_kick_min_strong_domains", 2))))
+        strong_domains = independent_strong_domain_count(session["strong_codes"])
+        if strong_domains < minimum_domains:
+            if not session.get("auto_kick_deferred_independent_domains", False):
+                session["auto_kick_deferred_independent_domains"] = True
+                self._admin_alert(
+                    f"§e自动踢出暂缓§r：{session['target_name']} 已达到会话分数门槛，"
+                    f"但强证据仅覆盖 {strong_domains}/{minimum_domains} 个独立行为领域。"
+                    "弱证据（例如自动搭路线索）不计入强证据领域；本次仅记录并等待管理员复核。"
+                )
+                self._log(
+                    "auto_kick_deferred_independent_domains",
+                    target_uuid=session.get("target_uuid"),
+                    session_score=session.get("score", 0),
+                    strong_codes=sorted(session.get("strong_codes", set())),
+                    strong_domains=strong_domains,
+                    required_domains=minimum_domains,
+                    rules=sorted(session.get("rule_codes", set())),
+                    action="review_only_no_kick",
+                )
+            return
+
         # 严重检测只产生本地待复核候选；永久封禁仍必须由管理员显式确认。
         self._remember_ban_candidate(session)
-        if not bool(self.cfg.get("auto_kick", True)):
-            return
         profile = self._profile_for_uuid(session.get("target_uuid") or "", create=False) or {}
         risk_score = float(profile.get("risk", 0.0))
         trust_enabled = bool(self.cfg.get("trust_enabled", True))
