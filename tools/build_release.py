@@ -10,8 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 ADDON_DIR = ROOT / "mcaddon"
-ADDON_OUTPUT = DIST / "ZP-AC-2.1.5.mcaddon"
-WHEEL_PATTERN = "endstone_zp_report_anticheat-0.6.4-*.whl"
+ADDON_OUTPUT = DIST / "ZP-AC-2.1.6.mcaddon"
+WHEEL_PATTERN = "endstone_zp_report_anticheat-0.6.5-*.whl"
 
 
 def main() -> int:
@@ -25,6 +25,7 @@ def main() -> int:
         ROOT / "plugins" / "endstone_zp_anticheat" / "plugin.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "config.toml",
         ROOT / "plugins" / "endstone_zp_anticheat" / "ai" / "engine.py",
+        ROOT / "plugins" / "endstone_zp_anticheat" / "policy.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "__init__.py",
     ]
     missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]
@@ -53,7 +54,7 @@ def main() -> int:
 
     wheels = sorted(DIST.glob(WHEEL_PATTERN))
     if len(wheels) != 1:
-        raise SystemExit(f"Expected exactly one 0.6.4 wheel, found {len(wheels)}")
+        raise SystemExit(f"Expected exactly one 0.6.5 wheel, found {len(wheels)}")
 
     print(f"Created: {ADDON_OUTPUT.relative_to(ROOT)}")
     print(f"Created: {wheels[0].relative_to(ROOT)}")
