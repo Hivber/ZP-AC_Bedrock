@@ -1698,7 +1698,12 @@ class ZPReportAntiCheat(Plugin):
 
         reporter_name = _clean(payload.get("reporterName"), 64)
         target_name = _clean(payload.get("targetName"), 64)
+        category = _clean(payload.get("category"), 32)
+        allowed_categories = {"恶意破坏", "攻击玩家", "辱骂", "外挂", "透视", "其他"}
+        if category not in allowed_categories:
+            category = "其他"
         reason = _clean(payload.get("reason"), 200)
+        report_context = f"类别：{category}" + (f"；补充原因：{reason}" if reason else "")
         report_id = _clean(payload.get("reportId"), 80)
         sender = event.sender
         sender_key = _player_key(sender)
@@ -1737,14 +1742,14 @@ class ZPReportAntiCheat(Plugin):
             elif now - last_report >= cooldown:
                 # 冷却后允许更新记录，但该账号仍只算一名独立举报者。
                 session["last_evidence"] = now
-            if reason and reason not in session["reasons"]:
-                session["reasons"].append(reason)
+            if report_context and report_context not in session["reasons"]:
+                session["reasons"].append(report_context)
                 session["reasons"] = session["reasons"][-10:]
             if report_id:
                 session["report_ids"].append(report_id)
                 session["report_ids"] = session["report_ids"][-50:]
         else:
-            session = self._new_session(target, reporter, reason, report_id)
+            session = self._new_session(target, reporter, report_context, report_id)
             self.sessions[target_key or ""] = session
             is_new_reporter = True
 
@@ -1752,7 +1757,8 @@ class ZPReportAntiCheat(Plugin):
         tier = self._tier(len(session["reporters"]))
         self._admin_alert(
             f"已接收举报：§e{target_name}§r；独立举报者 {len(session['reporters'])} 人；检测等级 T{tier}。"
-            + (f" 举报理由：{reason}" if reason else "")
+            + f" 举报类型：{category}"
+            + (f"；补充原因：{reason}" if reason else "")
         )
         self._log(
             "report_received",
@@ -1761,6 +1767,7 @@ class ZPReportAntiCheat(Plugin):
             reporter=reporter_name,
             reporter_count=len(session["reporters"]),
             tier=tier,
+            category=category,
             reason=reason,
             report_id=report_id,
             new_distinct_reporter=is_new_reporter,
