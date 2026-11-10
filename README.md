@@ -28,7 +28,16 @@ ZP-AC 是一套面向 Minecraft Bedrock 1.26.60 的反作弊系统，采用**一
 - 公开信用分 PvP 门槛适用于所有在线玩家，包括 OP 和管理员；反作弊检测豁免不等于公开信用分豁免。
 - 分数保存在插件本地 UUID 画像文件中；公开命令不显示 UUID、隐藏可信分、风险分或检测证据。
 
-## 双模式客户端检测（Endstone 1.0.0）\n\n- 普通 Bedrock 模式始终兼容：行为包通过 Script API 采集服务端可见的玩家行为，Endstone 负责权威验证；这不是客户端进程/内存扫描，也不是客户端完整性证明。\n- 可选原生客户端模式通过独立 TLS 1.2+ TCP 桥接接入。默认关闭，需配置证书、私钥和网络端口；Android SDK 使用证书 SHA-256 指纹固定服务器身份，因此可使用自签名证书，但证书更新后必须同步更新客户端指纹。没有 TLS 文件时插件不会启动监听。\n- 管理员使用 `/zpac clientstatus` 查看状态，`/zpac clientpair <在线玩家>` 私发一次性 5 分钟配对码，`/zpac clientrevoke <玩家|UUID>` 撤销配对并断开活动连接。\n- 原生设备配对后使用独立随机令牌；服务端只持久化令牌 SHA-256 摘要，不保存明文令牌。通信使用随机挑战、HMAC-SHA256、会话 ID、时间窗、递增序列号和大小/字段范围限制。\n- 原生客户端报告仅作为低置信度复核线索，不直接踢出、封禁或扣分。客户端自报的 root/debugger/完整性结果可能被篡改；它不能证明客户端没有作弊。\n- Android 传输 SDK 位于 `native_client/android/ZpAcClientBridge.kt`。它需要集成进实际的专用 Android 客户端；SDK 本身不会扫描 Minecraft 内存、进程或 DLL，也不代表已集成到官方 Bedrock APK。接入说明见 `native_client/README.md`。\n\n## 管理入口
+## 双模式客户端检测（Endstone 1.0.0）
+
+- 普通 Bedrock 模式始终兼容：行为包通过 Script API 采集服务端可见的玩家行为，Endstone 负责权威验证；这不是客户端进程/内存扫描，也不是客户端完整性证明。
+- 可选原生客户端模式通过独立 TLS 1.2+ TCP 桥接接入。默认关闭，需配置证书、私钥和网络端口；Android SDK 使用证书 SHA-256 指纹固定服务器身份，因此可使用自签名证书，但证书更新后必须同步更新客户端指纹。没有 TLS 文件时插件不会启动监听。
+- 管理员使用 `/zpac clientstatus` 查看状态，`/zpac clientpair <在线玩家>` 私发一次性 5 分钟配对码，`/zpac clientrevoke <玩家|UUID>` 撤销配对并断开活动连接。
+- 原生设备配对后使用独立随机令牌；服务端只持久化令牌 SHA-256 摘要，不保存明文令牌。通信使用随机挑战、HMAC-SHA256、会话 ID、时间窗、递增序列号和大小/字段范围限制。
+- 原生客户端报告仅作为低置信度复核线索，不直接踢出、封禁或扣分。客户端自报的 root/debugger/完整性结果可能被篡改；它不能证明客户端没有作弊。
+- Android 传输 SDK 位于 `native_client/android/ZpAcClientBridge.kt`。它需要集成进实际的专用 Android 客户端；SDK 本身不会扫描 Minecraft 内存、进程或 DLL，也不代表已集成到官方 Bedrock APK。接入说明见 `native_client/README.md`。
+
+## 管理入口
 
 - `/ba`（行为包自定义命令命名空间为 `zp_ac:ba`）：打开 ZP 综合菜单，包含“查看我的信用分”和“举报其他玩家”两个入口。
 - 举报界面依次提供“选择举报玩家”“选择举报类型”“填写举报原因”三项；举报类型为恶意破坏、攻击玩家、辱骂、外挂、透视、其他。补充原因最多 200 个字符，允许留空；举报类型会同步记录到行为包历史和 Endstone 管理员审计。
