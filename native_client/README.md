@@ -19,6 +19,17 @@ Native mode is disabled by default. Configure these values in the Endstone plugi
 
 Use a valid TLS certificate and firewall the port to the required client network. Do not expose the bridge over plaintext TCP. The plugin refuses to start the listener without both TLS files.
 
+For a private server, a self-signed certificate can be pinned by the Android SDK (the exact SHA-256 fingerprint is the trust anchor):
+
+```sh
+openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 365 \
+  -keyout server.key -out server.crt -subj "/CN=your-server-host"
+chmod 600 server.key
+openssl x509 -in server.crt -noout -fingerprint -sha256
+```
+
+Copy the certificate fingerprint (remove colons) into the Android client's `certificateSha256`. Keep the private key server-side only. When rotating the certificate, update the pinned fingerprint in the client build.
+
 Then restart Endstone and run `/zpac clientstatus`. To pair a player, an administrator runs `/zpac clientpair <online-player>`; the server privately sends that player a single-use code valid for five minutes. Enter it in the integrated native client. The app receives a per-device bearer token once and must store it using Android Keystore-backed encryption. Use `/zpac clientrevoke <online-player>` to revoke all paired devices for that UUID.
 
 ## Wire protocol
