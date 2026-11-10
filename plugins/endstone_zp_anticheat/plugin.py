@@ -1080,10 +1080,66 @@ class ZPReportAntiCheat(Plugin):
             sender.send_message("§c没有权限执行 ZP-AC 管理命令。需要 OP 或 zp_ac_admin 管理员标签。")
             return True
         if not args:
-            sender.send_message("§e用法：/zpac mute <玩家|UUID> | /zpac unmute <玩家|UUID> | /zpac credit <玩家|UUID> | /zpac trust <玩家|UUID> | /zpac top [数量] | /zpac cloud <on|off|status|sync> | /zpac candidates | /zpac confirmban <UUID> | /zpac pardon <UUID>")
+            sender.send_message("§e用法：/zpac client <status|pair|revoke> <在线玩家>；/zpac mute <玩家|UUID>；/zpac unmute <玩家|UUID>；/zpac credit <玩家|UUID>；/zpac trust <玩家|UUID>；/zpac cloud <on|off|status|sync>；/zpac candidates。")
             return True
         action = str(args[0]).lower()
         value = str(args[1]).strip() if len(args) > 1 else ""
+        if action == "client":
+            subaction = value.lower()
+            target_arg = str(args[2]).strip() if len(args) > 2 else ""
+            if subaction == "status":
+                target_uuid = self._resolve_player_uuid(target_arg) if target_arg else None
+                if not target_uuid:
+                    sender.send_message("§e用法：/zpac client status <在线玩家名|UUID>。")
+                    return True
+                status = self.native_attestation.status(target_uuid)
+                if not status["paired"]:
+                    sender.send_message(f"§7客户端模式：普通 Bedrock（服务端检测）；UUID={target_uuid}；未绑定原生客户端。")
+                else:
+                    last = float(status.get("last_attestation_at", 0.0))
+                    age = max(0, int(time.time() - last)) if last else -1
+                    sender.send_message(
+                        f"§8[§bZP-AC 客户端§8] §f模式：原生客户端已配对；在线={status['online']}；签名验证={status['signature_verified']}。"
+                    )
+                    sender.send_message(
+                        f"§7版本={status['client_version'] or '未知'}；Build={status['build_id'] or '未知'}；"
+                        f"最近验证={str(age)+'秒前' if age >= 0 else '尚未上报'}；序列={status['last_sequence']}。"
+                    )
+                    sender.send_message(
+                        f"§7自检声明：{json.dumps(status['integrity_claims'], ensure_ascii=False, separators=(',', ':'))[:240]}"
+                    )
+                return True
+            if subaction == "pair":
+                if not bool(self.cfg.get("native_attestation_enabled", False)) or self.native_attestation_http is None:
+                    sender.send_message("§c原生客户端验证 API 尚未启用或启动失败；请配置 native_attestation_enabled 并重启插件。")
+                    return True
+                target = self._find_online_player(target_arg)
+                target_uuid = _player_key(target) if target is not None else None
+                if not target_uuid:
+                    sender.send_message("§e用法：/zpac client pair <在线玩家名>。目标必须在线且具有有效 UUID。")
+                    return True
+                try:
+                    code = self.native_attestation.create_pairing_code(target_uuid)
+                except (ValueError, TypeError):
+                    sender.send_message("§c无法为该玩家生成配对码：UUID 格式无效。")
+                    return True
+                public_url = _clean(self.cfg.get("native_client_public_url", ""), 240)
+                sender.send_message(f"§a已生成一次性客户端配对码（5 分钟有效）：§f{code}")
+                sender.send_message(f"§7在专用 ZP-AC 客户端输入配对码；服务地址：{public_url or '请配置 native_client_public_url'}。")
+                sender.send_message("§e配对成功仅证明设备持有已登记密钥，不代表客户端完整性已被绝对证明。")
+                self._log("native_client_pairing_code_issued", target_uuid=target_uuid, action="admin_pairing_code_issued")
+                return True
+            if subaction == "revoke":
+                target_uuid = self._resolve_player_uuid(target_arg) if target_arg else None
+                if not target_uuid:
+                    sender.send_message("§e用法：/zpac client revoke <在线玩家名|UUID>。")
+                    return True
+                removed = self.native_attestation.revoke(target_uuid)
+                sender.send_message("§a已撤销原生客户端设备密钥。" if removed else "§e该玩家没有已登记的原生客户端密钥。")
+                self._log("native_client_key_revoked", target_uuid=target_uuid, action="admin_revoke")
+                return True
+            sender.send_message("§e用法：/zpac client status <玩家> | pair <在线玩家> | revoke <玩家>。")
+            return True
         if action == "mute":
             player_uuid = self._resolve_player_uuid(value) if value else None
             if not player_uuid:
@@ -3051,6 +3107,10 @@ class ZPReportAntiCheat(Plugin):
             pass
         key = _player_key(event.player)
         if key:
+            try:
+                self.native_attestation.set_online(key, True)
+            except (ValueError, TypeError):
+                pass
             # Start a fresh online-time baseline on every join. Time spent offline
             # (including server downtime) must never count toward credit recovery.
             profile = self._profile_for_uuid(key)
@@ -3072,6 +3132,11 @@ class ZPReportAntiCheat(Plugin):
     @event_handler
     def on_player_quit(self, event: PlayerQuitEvent) -> None:
         key = _player_key(event.player)
+        if key:
+            try:
+                self.native_attestation.set_online(key, False)
+            except (ValueError, TypeError):
+                pass
         if key and key in self.sessions:
             self.sessions[key]["offline_since"] = time.monotonic()
 
