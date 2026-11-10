@@ -48,6 +48,7 @@ from .runtime_metrics import RuntimeMetrics
 from .mining_analysis import classify_mined_block, summarize_mining_events
 from .mute import DEFAULT_MUTE_DURATIONS_SECONDS, MuteStore
 from .chat_moderation import DEFAULT_INSULT_TERMS, RecentChatStore
+from .native_attestation import NativeAttestationHTTPServer, NativeAttestationService, PROTOCOL_VERSION as NATIVE_ATTESTATION_PROTOCOL
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -177,7 +178,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.9.0"
+    version = "1.0.0"
     commands = {
         "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
@@ -257,6 +258,14 @@ class ZPReportAntiCheat(Plugin):
             "insult_chat_window_seconds": 600,
             "insult_chat_max_messages_per_player": 50,
             "insult_detection_terms": list(DEFAULT_INSULT_TERMS),
+            "native_attestation_enabled": False,
+            "native_attestation_bind_host": "127.0.0.1",
+            "native_attestation_bind_port": 9179,
+            "native_attestation_tls_cert": "",
+            "native_attestation_tls_key": "",
+            "native_client_public_url": "",
+            "native_attestation_challenge_ttl_seconds": 45,
+            "native_attestation_pairing_ttl_seconds": 300,
         }
         changed = False
         for key, value in defaults.items():
@@ -291,6 +300,39 @@ class ZPReportAntiCheat(Plugin):
         self.audit_path = Path(self.data_folder) / "evidence.jsonl"
         self.data_path = Path(self.data_folder)
         self.data_path.mkdir(parents=True, exist_ok=True)
+        self._native_attestation_results: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
+        self.native_attestation = NativeAttestationService(
+            self.data_path / "native_client_registry.json",
+            challenge_ttl_seconds=float(self.cfg.get("native_attestation_challenge_ttl_seconds", 45)),
+            pairing_ttl_seconds=float(self.cfg.get("native_attestation_pairing_ttl_seconds", 300)),
+            result_callback=self._queue_native_attestation_result,
+        )
+        self.native_attestation_http: NativeAttestationHTTPServer | None = None
+        for online_player in list(self.server.online_players):
+            online_uuid = _player_key(online_player)
+            if online_uuid:
+                try:
+                    self.native_attestation.set_online(online_uuid, True)
+                except (ValueError, TypeError):
+                    pass
+        if bool(self.cfg.get("native_attestation_enabled", False)):
+            try:
+                self.native_attestation_http = NativeAttestationHTTPServer(
+                    self.native_attestation,
+                    str(self.cfg.get("native_attestation_bind_host", "127.0.0.1")),
+                    int(self.cfg.get("native_attestation_bind_port", 9179)),
+                    str(self.cfg.get("native_attestation_tls_cert", "")),
+                    str(self.cfg.get("native_attestation_tls_key", "")),
+                )
+                self.native_attestation_http.start()
+                self.logger.info(
+                    f"原生客户端验证 API 已启动：{self.cfg.get('native_attestation_bind_host')}:{self.cfg.get('native_attestation_bind_port')}；协议 {NATIVE_ATTESTATION_PROTOCOL}。"
+                )
+            except Exception as exc:
+                self.native_attestation_http = None
+                self.logger.error(f"原生客户端验证 API 启动失败：{type(exc).__name__}: {exc}")
+        else:
+            self.logger.info("原生客户端验证 API 未启用；普通基岩版玩家继续使用服务端权威检测。")
         mute_durations = self.cfg.get("insult_mute_durations_seconds", DEFAULT_MUTE_DURATIONS_SECONDS)
         if not isinstance(mute_durations, (list, tuple)) or not mute_durations:
             mute_durations = DEFAULT_MUTE_DURATIONS_SECONDS
@@ -348,7 +390,7 @@ class ZPReportAntiCheat(Plugin):
             f"自动踢出={self.cfg.get('auto_kick', True)}；隐藏可信画像={'启用' if self.cfg.get('trust_enabled', True) else '关闭'}；"
             "永久封禁必须管理员确认。"
         )
-        self.logger.info(f"通信：举报 {MESSAGE_ID}；插件握手 {BP_READY_ID}；管理桥接 {BP_ADMIN_REQUEST_ID}/{BP_ADMIN_RESPONSE_ID}；云端默认关闭。")
+        self.logger.info(f"通信：举报 {MESSAGE_ID}；插件握手 {BP_READY_ID}；管理桥接 {BP_ADMIN_REQUEST_ID}/{BP_ADMIN_RESPONSE_ID}；原生客户端协议 {NATIVE_ATTESTATION_PROTOCOL}；云端默认关闭。")
         if bool(self.cfg.get("cloud_enabled", False)):
             self._start_cloud_sync("startup")
 
@@ -359,12 +401,51 @@ class ZPReportAntiCheat(Plugin):
         except Exception:
             pass
         try:
+            if self.native_attestation_http is not None:
+                self.native_attestation_http.stop()
+                self.native_attestation_http = None
+        except Exception as exc:
+            self.logger.warning(f"关闭原生客户端验证 API 失败：{type(exc).__name__}")
+        try:
             self._save_profiles()
         except Exception as exc:
             self.logger.warning(f"关闭时保存隐藏玩家画像失败：{type(exc).__name__}")
         self.logger.info("ZP 举报联动反作弊已卸载。")
 
     # ----------------------------- helpers -----------------------------
+
+    def _queue_native_attestation_result(self, result: dict[str, Any]) -> None:
+        self._native_attestation_results.put(dict(result))
+
+    def _drain_native_attestation_results(self) -> None:
+        while True:
+            try:
+                result = self._native_attestation_results.get_nowait()
+            except queue.Empty:
+                break
+            player_uuid = str(result.get("player_uuid", ""))
+            session = self.sessions.get(player_uuid)
+            if session is not None:
+                session["client_mode"] = "native_attested"
+                session["client_attestation_at"] = float(result.get("received_at", time.time()))
+            self.metrics.increment("native_attestations_verified")
+            claims = result.get("integrity_claims", {})
+            self._log(
+                "native_client_attestation_verified",
+                target_uuid=player_uuid,
+                key_id=result.get("key_id", ""),
+                sequence=result.get("sequence", 0),
+                client_version=result.get("client_version", ""),
+                build_id=result.get("build_id", ""),
+                capabilities=result.get("capabilities", []),
+                integrity_claims=claims,
+                action="signature_verified_telemetry_only_no_automatic_punishment",
+            )
+            failed_claims = sorted(key for key, value in claims.items() if value is False)
+            if failed_claims:
+                self._admin_alert(
+                    f"§e原生客户端自检报告异常§r：UUID {player_uuid}；项目 {', '.join(failed_claims)}。仅为客户端自报线索，尚未独立验证，不自动处罚。"
+                )
 
     def _log(self, kind: str, **fields: Any) -> None:
         row = {
@@ -2743,6 +2824,7 @@ class ZPReportAntiCheat(Plugin):
         pulse_started = time.perf_counter()
         self.metrics.increment("pulse_runs")
         self._drain_cloud_results()
+        self._drain_native_attestation_results()
         now = time.monotonic()
         self._sync_operator_admin_tags()
         if bool(self.cfg.get("behavior_pack_bridge_enabled", True)) and now - self._bp_last_ready >= 30.0:
