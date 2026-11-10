@@ -8,10 +8,15 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
 import java.security.MessageDigest
+import java.security.cert.CertificateException
+import java.security.cert.X509Certificate
+import java.security.SecureRandom
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 
 /**
  * Small Android SDK transport for ZP-AC's optional native-client bridge.
@@ -29,7 +34,7 @@ class ZpAcClientBridge(
     private val host: String,
     private val port: Int,
     private val certificateSha256: String,
-    private val socketFactory: SSLSocketFactory = SSLSocketFactory.getDefault() as SSLSocketFactory,
+    private val socketFactory: SSLSocketFactory = pinnedSocketFactory(certificateSha256),
 ) : Closeable {
     private var socket: SSLSocket? = null
     private var reader: BufferedReader? = null
@@ -156,5 +161,27 @@ class ZpAcClientBridge(
 
     companion object {
         const val PROTOCOL = "zp-ac-native-v1"
+
+        private fun pinnedSocketFactory(fingerprint: String): SSLSocketFactory {
+            val expected = fingerprint.replace(":", "").lowercase()
+            require(expected.length == 64) { "A SHA-256 certificate fingerprint is required" }
+            val trustManager = object : X509TrustManager {
+                override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {
+                    throw CertificateException("Client certificates are not used")
+                }
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                    if (chain.isEmpty()) throw CertificateException("Server certificate is missing")
+                    val actual = MessageDigest.getInstance("SHA-256").digest(chain[0].encoded)
+                        .joinToString("") { "%02x".format(it) }
+                    if (!actual.equals(expected, ignoreCase = true)) {
+                        throw CertificateException("Server certificate fingerprint mismatch")
+                    }
+                }
+            }
+            val context = SSLContext.getInstance("TLS")
+            context.init(null, arrayOf(trustManager), SecureRandom())
+            return context.socketFactory
+        }
     }
 }
