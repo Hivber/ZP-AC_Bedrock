@@ -54,6 +54,7 @@ class _ClientHandler(socketserver.StreamRequestHandler):
 
     def handle(self) -> None:
         owner = self.server.owner
+        active_uuid = ""
         self.request.settimeout(15.0)
         try:
             first = self._read()
@@ -101,6 +102,8 @@ class _ClientHandler(socketserver.StreamRequestHandler):
                 self._send({"type": "error", "code": "challenge_failed"})
                 return
             self._send({"type": "ready", "protocol": PROTOCOL, "session_id": session_id, "heartbeat_seconds": 10})
+            active_uuid = player_uuid
+            owner._register_connection(player_uuid, self.request)
             owner.events.put({"kind": "connected", "player_uuid": player_uuid, "at": time.time()})
             last_sequence = 0
             self.request.settimeout(25.0)
@@ -135,6 +138,12 @@ class _ClientHandler(socketserver.StreamRequestHandler):
         except (OSError, ssl.SSLError, TimeoutError, ValueError):
             return
         finally:
+            if active_uuid:
+                owner._unregister_connection(active_uuid, self.request)
+                try:
+                    owner.events.put_nowait({"kind": "disconnected", "player_uuid": active_uuid, "at": time.time()})
+                except queue.Full:
+                    pass
             try:
                 self.request.close()
             except Exception:
@@ -165,6 +174,8 @@ class NativeClientBridge:
         self.thread = None
         self.stopping = threading.Event()
         self.error = ""
+        self._connection_lock = threading.RLock()
+        self._active_sockets: dict[str, set[Any]] = {}
 
     def start(self) -> bool:
         if self.server is not None:
@@ -197,8 +208,46 @@ class NativeClientBridge:
             self.stop()
             return False
 
+    def _register_connection(self, player_uuid: str, client_socket: Any) -> None:
+        with self._connection_lock:
+            self._active_sockets.setdefault(player_uuid, set()).add(client_socket)
+
+    def _unregister_connection(self, player_uuid: str, client_socket: Any) -> None:
+        with self._connection_lock:
+            sockets = self._active_sockets.get(player_uuid)
+            if sockets is not None:
+                sockets.discard(client_socket)
+                if not sockets:
+                    self._active_sockets.pop(player_uuid, None)
+
+    def disconnect_player(self, player_uuid: str) -> int:
+        with self._connection_lock:
+            sockets = list(self._active_sockets.pop(str(player_uuid), set()))
+        for client_socket in sockets:
+            try:
+                client_socket.shutdown(2)
+            except Exception:
+                pass
+            try:
+                client_socket.close()
+            except Exception:
+                pass
+        return len(sockets)
+
     def stop(self) -> None:
         self.stopping.set()
+        with self._connection_lock:
+            all_sockets = [sock for group in self._active_sockets.values() for sock in group]
+            self._active_sockets.clear()
+        for sock in all_sockets:
+            try:
+                sock.shutdown(2)
+            except Exception:
+                pass
+            try:
+                sock.close()
+            except Exception:
+                pass
         server = self.server
         self.server = None
         if server is not None:
