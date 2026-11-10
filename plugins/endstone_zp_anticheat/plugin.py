@@ -3144,4 +3144,6 @@ class ZPReportAntiCheat(Plugin):
         key = _player_key(event.player)
         if key and key in self.sessions:
             self.sessions[key]["offline_since"] = time.monotonic()
+        if key:
+            self.native_client_bridge.disconnect_player(key)
 
