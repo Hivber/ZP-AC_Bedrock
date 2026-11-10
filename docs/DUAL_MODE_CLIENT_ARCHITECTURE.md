@@ -28,7 +28,7 @@
 3. 专用客户端通过 HTTPS 调用 `POST /v1/enroll`，提交 UUID、公钥、key_id、配对码和持钥证明。
 4. 客户端定期调用 `POST /v1/challenge` 获取随机 nonce、challenge_id、sequence。
 5. 客户端将协议版本、UUID、设备 key_id、挑战、版本/build、能力列表、自检声明及遥测摘要组成规范化 JSON，并用 ECDSA P-256/SHA-256 签名。
-6. 客户端调用 `POST /v1/attest`。服务端验证后写入 `native_client_registry.json` 和证据审计日志。
+6. 客户端调用 `POST /v1/attest`，请求体为 `{signed_payload: Base64(原始 JSON UTF-8 字节), signature: Base64(ECDSA 签名)}`；签名直接覆盖解码后的原始字节，避免 Android 与 Python 的 JSON 数字/转义序列化差异。服务端解析并验证后写入 `native_client_registry.json` 和证据审计日志。
 7. Endstone 将原生客户端结果与自身权威观察结果关联；当前版本不会仅凭客户端自报异常自动扣分、踢出或封禁。
 
 ## 3. HTTP API
