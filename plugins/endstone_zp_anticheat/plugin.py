@@ -1016,6 +1016,108 @@ class ZPReportAntiCheat(Plugin):
             )
             return True
 
+        if action in {"center", "status", "health"}:
+            checks = self._anti_cheat_checks()
+            enabled = sum(1 for state in checks.values() if state)
+            metrics = self.metrics.snapshot()
+            pulse = metrics["durations"].get("pulse", {})
+            sender.send_message(
+                f"§8[§bZP-AC 管理中心§8] §f版本 {self.version}；在线玩家 {len(list(self.server.online_players))}；"
+                f"监控会话 {len(self.sessions)}；待复核候选 {len(self.ban_candidates)}。"
+            )
+            sender.send_message(
+                f"§7检测模块 {enabled}/{len(checks)} 启用；本地证据 {self.evidence_store.count()} 条；"
+                f"永久封禁 UUID {len(self.local_permanent_bans)}。"
+            )
+            sender.send_message(
+                f"§7Pulse 最近 {self._pulse_last_ms:.2f}ms；P95 {pulse.get('p95_ms', 0.0):.2f}ms；"
+                f"最大 {pulse.get('max_ms', 0.0):.2f}ms。"
+            )
+            sender.send_message("§e命令：/zpac evidence <玩家名|UUID> [1-10]；/zpac review <证据ID> <confirm|dismiss>；/zpac player <玩家名|UUID>；/zpac mining。")
+            return True
+
+        if action == "evidence":
+            target_uuid = self._resolve_player_uuid(value) if value else None
+            if not target_uuid:
+                sender.send_message("§e用法：/zpac evidence <在线玩家名|UUID> [数量]。")
+                return True
+            limit = 5
+            try:
+                limit = max(1, min(10, int(args[2]))) if len(args) > 2 else 5
+            except (TypeError, ValueError):
+                sender.send_message("§c数量必须为 1-10。")
+                return True
+            records = self.evidence_store.recent(target_uuid, limit)
+            if not records:
+                sender.send_message("§a该玩家暂无结构化检测证据。")
+                return True
+            sender.send_message(f"§8[§bZP-AC 证据中心§8] §7UUID={target_uuid}，最近 {len(records)} 条：")
+            for record in records:
+                review = record.get("review") or {}
+                status = review.get("status", "pending")
+                sender.send_message(
+                    f"§e{record.get('evidence_id', '')} §7{record.get('recorded_at', '')} "
+                    f"§f{record.get('title', record.get('code', 'unknown'))} "
+                    f"§7置信={'高' if record.get('high_confidence') else '辅助'} "
+                    f"复核={status}"
+                )
+                sender.send_message(f"§8{_clean(record.get('detail', ''), 180)}")
+            sender.send_message("§7复核只添加管理员审查标记，不会自动封禁或改变玩家分数。")
+            return True
+
+        if action == "review":
+            evidence_id = value
+            status_arg = str(args[2]).lower() if len(args) > 2 else ""
+            status_map = {"confirm": "confirmed", "confirmed": "confirmed", "dismiss": "dismissed", "dismissed": "dismissed"}
+            if status_arg not in status_map:
+                sender.send_message("§e用法：/zpac review <证据ID> <confirm|dismiss>。")
+                return True
+            try:
+                review = self.evidence_store.review(
+                    evidence_id, status_map[status_arg],
+                    _clean(getattr(sender, "name", "console"), 64),
+                )
+            except (ValueError, KeyError) as exc:
+                sender.send_message(f"§c证据复核失败：{_clean(str(exc), 120)}")
+                return True
+            self._log(
+                "evidence_review",
+                evidence_id=evidence_id,
+                status=review["status"],
+                reviewer=review["reviewer"],
+                action="annotation_only_no_automatic_punishment",
+            )
+            self.metrics.increment("evidence_reviews")
+            sender.send_message(f"§a证据 {evidence_id} 已标记为 {review['status']}。该操作仅记录复核结果，不自动处罚或改分。")
+            return True
+
+        if action == "player":
+            target_uuid = self._resolve_player_uuid(value) if value else None
+            if not target_uuid:
+                sender.send_message("§e用法：/zpac player <在线玩家名|UUID>。")
+                return True
+            profile = self._profile_for_uuid(target_uuid, create=False) or {}
+            credit = clamp_public_credit(profile.get("public_credit", self.cfg.get("public_credit_initial_score", PUBLIC_CREDIT_DEFAULT)))
+            sender.send_message(
+                f"§8[§bZP-AC 玩家档案§8] §7UUID={target_uuid} "
+                f"§f公开信用分 {credit:.1f}/100；§c风险 {float(profile.get('risk', 0.0)):.1f}/100；"
+                f"§a可信 {float(profile.get('trust', self.cfg.get('trust_initial_score', 50.0))):.1f}/100。"
+            )
+            sender.send_message(
+                f"§7证据累计 {int(profile.get('flags', 0))}；强证据 {int(profile.get('strong_flags', 0))}；"
+                f"规则计数 {len(profile.get('rule_counts', {}))}；最近规则 {_clean(profile.get('last_rule', '无'), 48) or '无'}。"
+            )
+            sender.send_message("§7详细证据：/zpac evidence <玩家名|UUID>。")
+            return True
+
+        if action == "mining":
+            sender.send_message(
+                f"§8[§bZP-AC 矿物防护§8] §f定向采矿分析：{'启用' if self._check_enabled('xray') else '关闭'}；"
+                f"记录证据 {sum(1 for row in self.evidence_store._read_jsonl(self.evidence_store.path) if row.get('code') == 'xray_mining_pattern')} 条。"
+            )
+            sender.send_message("§e当前运行的是服务端挖矿行为分析，不是客户端区块混淆。Endstone 当前事件桥接未实现逐玩家伪矿石/区块数据下发，因此不会伪称已启用矿物遮蔽。")
+            return True
+
         if action == "top":
             count = 10
             try:
