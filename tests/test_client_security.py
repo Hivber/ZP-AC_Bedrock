@@ -5,6 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import queue
+
+from plugins.endstone_zp_anticheat.client_bridge import NativeClientBridge
 from plugins.endstone_zp_anticheat.client_security import (
     NativeClientRegistry, PROTOCOL, validate_telemetry,
 )
@@ -56,6 +59,23 @@ class NativeClientSecurityTests(unittest.TestCase):
         self.assertTrue(NativeClientRegistry.verify_payload(token, {**payload, "signature": signature}, signature))
         changed = {**payload, "seq": 2, "signature": signature}
         self.assertFalse(NativeClientRegistry.verify_payload(token, changed, signature))
+
+    def test_pair_attempts_are_rate_limited_per_source_ip(self):
+        class Logger:
+            def info(self, message): pass
+            def warning(self, message): pass
+            def error(self, message): pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            registry = NativeClientRegistry(Path(directory) / "clients.json")
+            bridge = NativeClientBridge(
+                registry, queue.Queue(), "127.0.0.1", 0, "", "", Logger()
+            )
+            for _ in range(8):
+                self.assertTrue(bridge.allow_pair_attempt("192.0.2.1", now=100))
+            self.assertFalse(bridge.allow_pair_attempt("192.0.2.1", now=101))
+            self.assertTrue(bridge.allow_pair_attempt("192.0.2.1", now=401))
+            self.assertTrue(bridge.allow_pair_attempt("192.0.2.2", now=101))
 
     def test_telemetry_schema_is_bounded(self):
         valid = {
