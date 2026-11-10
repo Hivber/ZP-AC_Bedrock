@@ -1,12 +1,17 @@
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
 
-from plugins.endstone_zp_anticheat.mute import (
-    DEFAULT_MUTE_DURATIONS_SECONDS,
-    MuteStore,
-    duration_for_violation,
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "zp_mute_store", ROOT / "plugins/endstone_zp_anticheat/mute.py"
 )
+MUTE = importlib.util.module_from_spec(SPEC)
+assert SPEC is not None and SPEC.loader is not None
+SPEC.loader.exec_module(MUTE)
+MuteStore = MUTE.MuteStore
+duration_for_violation = MUTE.duration_for_violation
 
 
 class MuteStoreTests(unittest.TestCase):
