@@ -36,6 +36,9 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q plugins/endstone_zp_anticheat tools tests
 
+      - name: Install native attestation test dependency
+        run: python -m pip install "cryptography>=43"
+
       - name: Test local AI behavior engine
         run: python -m unittest discover -s tests -v
 
@@ -61,8 +64,8 @@ jobs:
           assert manifest["header"]["version"] == [2, 1, 9]
           assert manifest["modules"][0]["version"] == [2, 1, 9]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.9.0"
-          assert 'version = "0.9.0"' in plugin
+          assert project["project"]["version"] == "1.0.0"
+          assert 'version = "1.0.0"' in plugin
           assert resource_manifest["header"]["version"] == [1, 0, 0]
           assert resource_manifest["header"]["min_engine_version"] == [1, 26, 60]
           assert resource_manifest["modules"][0]["type"] == "resources"
@@ -92,6 +95,11 @@ jobs:
           assert "event.is_cancelled = True" in plugin
           assert "MuteStore" in plugin
           assert "RecentChatStore" in plugin
+          assert "NativeAttestationService" in plugin
+          assert "NATIVE_ATTESTATION_PROTOCOL" in plugin
+          assert "native_attestation_enabled" in config
+          assert "native_attestation.py" in Path("tools/build_release.py").read_text(encoding="utf-8")
+          assert "test_challenge_is_one_time_and_replay_is_rejected" in Path("tests/test_native_attestation.py").read_text(encoding="utf-8")
           assert "insult_report_not_confirmed" in plugin
           assert "test_history_expires_after_window" in Path("tests/test_chat_moderation.py").read_text(encoding="utf-8")
           assert "chat_moderation.py" in Path("tools/build_release.py").read_text(encoding="utf-8")
@@ -187,7 +195,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v5
         with:
-          name: ZP-AC-2.1.9-and-Endstone-0.9.0
+          name: ZP-AC-2.1.9-and-Endstone-1.0.0
           path: |
             dist/*.mcaddon
             dist/*.whl
