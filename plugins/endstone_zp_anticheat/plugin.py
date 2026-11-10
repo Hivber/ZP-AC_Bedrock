@@ -1947,18 +1947,17 @@ class ZPReportAntiCheat(Plugin):
             return
         if self.mute_store.is_muted(player_uuid):
             event.is_cancelled = True
-        now_mono = time.monotonic()
-        if now_mono - self._mute_notice_last.get(player_uuid, 0.0) < 3.0:
-            return
-        self._mute_notice_last[player_uuid] = now_mono
-        record = self.mute_store.get(player_uuid)
-        remaining = max(1, int((float(record["muted_until"]) - time.time() + 59) // 60))
-        try:
-            player.send_message(
-                f"§c你目前处于禁言状态，无法发送聊天消息。§7剩余约 {remaining} 分钟。"
-            )
-        except Exception:
-            pass
+            now_mono = time.monotonic()
+            if now_mono - self._mute_notice_last.get(player_uuid, 0.0) >= 3.0:
+                self._mute_notice_last[player_uuid] = now_mono
+                record = self.mute_store.get(player_uuid)
+                remaining = max(1, int((float(record["muted_until"]) - time.time() + 59) // 60))
+                try:
+                    player.send_message(
+                        f"§c你目前处于禁言状态，无法发送聊天消息。§7剩余约 {remaining} 分钟。"
+                    )
+                except Exception:
+                    pass
             return
         if not bool(getattr(event, "is_cancelled", False)):
             self.recent_chat_store.record(player_uuid, getattr(event, "message", ""))
