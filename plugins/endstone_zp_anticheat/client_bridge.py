@@ -77,7 +77,10 @@ class _ClientHandler(socketserver.StreamRequestHandler):
                     "player_uuid": player_uuid, "token": token,
                     "warning": "Store this token securely. It is shown only once.",
                 })
-                owner.events.put({"kind": "paired", "player_uuid": player_uuid, "at": time.time()})
+                try:
+                    owner.events.put_nowait({"kind": "paired", "player_uuid": player_uuid, "at": time.time()})
+                except queue.Full:
+                    pass
                 return
             if first.get("type") != "hello":
                 return
@@ -108,7 +111,12 @@ class _ClientHandler(socketserver.StreamRequestHandler):
             self._send({"type": "ready", "protocol": PROTOCOL, "session_id": session_id, "heartbeat_seconds": 10})
             active_uuid = player_uuid
             owner._register_connection(player_uuid, self.request)
-            owner.events.put({"kind": "connected", "player_uuid": player_uuid, "at": time.time()})
+            try:
+                owner.events.put_nowait({"kind": "connected", "player_uuid": player_uuid, "at": time.time()})
+            except queue.Full:
+                owner._unregister_connection(player_uuid, self.request)
+                active_uuid = ""
+                return
             last_sequence = 0
             last_received_at = 0.0
             self.request.settimeout(25.0)
@@ -129,16 +137,20 @@ class _ClientHandler(socketserver.StreamRequestHandler):
                 data = validate_telemetry(message.get("data"))
                 if data is None or not owner.registry.verify_payload(token, message, str(message.get("signature", ""))):
                     continue
+                received_at = time.monotonic()
+                try:
+                    owner.events.put_nowait({
+                        "kind": "telemetry",
+                        "player_uuid": player_uuid,
+                        "token_hash": token_digest,
+                        "sequence": sequence,
+                        "data": data,
+                        "at": time.time(),
+                    })
+                except queue.Full:
+                    continue
                 last_sequence = sequence
-                last_received_at = time.monotonic()
-                owner.events.put({
-                    "kind": "telemetry",
-                    "player_uuid": player_uuid,
-                    "token_hash": token_digest,
-                    "sequence": sequence,
-                    "data": data,
-                    "at": time.time(),
-                })
+                last_received_at = received_at
                 try:
                     self._send({"type": "ack", "seq": sequence})
                 except Exception:
