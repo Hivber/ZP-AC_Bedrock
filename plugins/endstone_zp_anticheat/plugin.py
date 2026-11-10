@@ -21,6 +21,7 @@ from endstone.event import (
     BlockBreakEvent,
     BlockPlaceEvent,
     PacketReceiveEvent,
+    PacketSendEvent,
     PlayerDimensionChangeEvent,
     PlayerGameModeChangeEvent,
     PlayerInteractEvent,
@@ -1115,7 +1116,7 @@ class ZPReportAntiCheat(Plugin):
                 f"§8[§bZP-AC 矿物防护§8] §f定向采矿分析：{'启用' if self._check_enabled('xray') else '关闭'}；"
                 f"记录证据 {self.evidence_store.count_by_code('xray_mining_pattern')} 条。"
             )
-            sender.send_message("§e当前运行的是服务端挖矿行为分析，不是客户端区块混淆。Endstone 当前事件桥接未实现逐玩家伪矿石/区块数据下发，因此不会伪称已启用矿物遮蔽。")
+            sender.send_message("§e当前已具备 Endstone PacketSendEvent 出站包观察能力（LevelChunk=58、SubChunk=174）；本版本尚未启用协议 2225 区块负载改写器。矿物遮蔽仍处于待实现/验证状态，当前不会伪称已生效。")
             return True
 
         if action == "top":
@@ -2326,6 +2327,19 @@ class ZPReportAntiCheat(Plugin):
             events.clear()
 
     # ----------------------------- packet observation -----------------------------
+
+    @event_handler
+    def on_packet_send(self, event: PacketSendEvent) -> None:
+        """Observe outgoing chunk traffic without mutating client-visible world data."""
+        self.metrics.increment("packet_send_events")
+        try:
+            packet_id = int(event.packet_id)
+            if packet_id == 58:  # LevelChunk, protocol 2225
+                self.metrics.increment("outgoing_level_chunk_packets")
+            elif packet_id == 174:  # SubChunk, protocol 2225
+                self.metrics.increment("outgoing_subchunk_packets")
+        except Exception:
+            self.metrics.increment("packet_send_observer_errors")
 
     @event_handler
     def on_packet_receive(self, event: PacketReceiveEvent) -> None:
