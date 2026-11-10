@@ -164,6 +164,12 @@ class NativeAttestationTests(unittest.TestCase):
             self.assertTrue(self.service.allow_request("192.0.2.1"))
         self.assertFalse(self.service.allow_request("192.0.2.1"))
 
+    def test_non_loopback_listener_requires_tls(self):
+        listener = MOD.NativeAttestationHTTPServer(self.service, "0.0.0.0", 0)
+        with self.assertRaises(ValueError):
+            listener.start()
+        self.assertIsNone(listener.httpd)
+
 
 if __name__ == "__main__":
     unittest.main()
