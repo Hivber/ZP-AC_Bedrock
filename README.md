@@ -35,6 +35,7 @@ ZP-AC 是一套面向 Minecraft Bedrock 1.26.60 的反作弊系统，采用**一
 - 管理员使用 `/zpac clientstatus` 查看状态，`/zpac clientpair <在线玩家>` 私发一次性 5 分钟配对码，`/zpac clientrevoke <玩家|UUID>` 撤销配对并断开活动连接。
 - 原生设备配对后使用独立随机令牌；服务端只持久化令牌 SHA-256 摘要，不保存明文令牌。通信使用随机挑战、HMAC-SHA256、会话 ID、时间窗、递增序列号和大小/字段范围限制。
 - 原生客户端报告仅作为低置信度复核线索，不直接踢出、封禁或扣分。客户端自报的 root/debugger/完整性结果可能被篡改；它不能证明客户端没有作弊。
+- 原生 SDK 可选上报游戏侧位置与 RTT；Endstone 会与服务端权威位置快照交叉比对，差异只写入低置信度证据并通知管理员，不改变风险分、不触发处罚。
 - Android 传输 SDK 位于 `native_client/android/ZpAcClientBridge.kt`。它需要集成进实际的专用 Android 客户端；SDK 本身不会扫描 Minecraft 内存、进程或 DLL，也不代表已集成到官方 Bedrock APK。接入说明见 `native_client/README.md`。
 
 ## 管理入口
