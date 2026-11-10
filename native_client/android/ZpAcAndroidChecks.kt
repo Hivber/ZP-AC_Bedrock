@@ -23,6 +23,8 @@ object ZpAcAndroidChecks {
         appStartedAtElapsedRealtime: Long,
     ): Snapshot {
         val packageNameValid = context.packageName == expectedPackageName
+        val expectedSigner = expectedSignerSha256.replace(":", "").lowercase()
+        require(expectedSigner.length == 64) { "Expected APK signer SHA-256 fingerprint is required" }
         val signerValid = try {
             val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 context.packageManager.getPackageInfo(
@@ -42,12 +44,11 @@ object ZpAcAndroidChecks {
                 @Suppress("DEPRECATION")
                 info.signatures
             }
-            val expected = expectedSignerSha256.replace(":", "").lowercase()
             signatures?.any { signature ->
                 val digest = MessageDigest.getInstance("SHA-256")
                     .digest(signature.toByteArray())
                     .joinToString("") { "%02x".format(it) }
-                digest.equals(expected, ignoreCase = true)
+                digest.equals(expectedSigner, ignoreCase = true)
             } == true
         } catch (_: Exception) {
             false
