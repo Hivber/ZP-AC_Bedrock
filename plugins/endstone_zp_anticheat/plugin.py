@@ -354,7 +354,8 @@ class ZPReportAntiCheat(Plugin):
             max_tokens_per_player=int(self.cfg.get("native_client_max_tokens_per_player", 3)),
         )
         self._native_client_events: queue.Queue = queue.Queue(maxsize=1024)
-        self.native_client_connections: dict[str, float] = {}
+        self.native_client_connections: dict[str, int] = {}
+        self.native_client_last_seen: dict[str, float] = {}
         self.native_client_latest: dict[str, dict[str, Any]] = {}
         self.native_client_bridge = NativeClientBridge(
             self.native_client_registry,
@@ -1074,6 +1075,7 @@ class ZPReportAntiCheat(Plugin):
             removed = self.native_client_registry.revoke_player(target_uuid)
             disconnected = self.native_client_bridge.disconnect_player(target_uuid)
             self.native_client_connections.pop(target_uuid, None)
+            self.native_client_last_seen.pop(target_uuid, None)
             self.native_client_latest.pop(target_uuid, None)
             sender.send_message(f"§a已撤销该 UUID 的 {removed} 个原生客户端配对令牌，并断开 {disconnected} 个活动连接。")
             self._log("native_client_tokens_revoked", target_uuid=target_uuid, revoked_count=removed)
@@ -2823,11 +2825,17 @@ class ZPReportAntiCheat(Plugin):
             if not player_uuid:
                 continue
             if kind == "connected":
-                self.native_client_connections[player_uuid] = float(event.get("at", time.time()))
+                self.native_client_connections[player_uuid] = self.native_client_connections.get(player_uuid, 0) + 1
+                self.native_client_last_seen[player_uuid] = float(event.get("at", time.time()))
                 self._log("native_client_connected", target_uuid=player_uuid)
                 continue
             if kind == "disconnected":
-                self.native_client_connections.pop(player_uuid, None)
+                remaining = self.native_client_connections.get(player_uuid, 0) - 1
+                if remaining > 0:
+                    self.native_client_connections[player_uuid] = remaining
+                else:
+                    self.native_client_connections.pop(player_uuid, None)
+                    self.native_client_last_seen.pop(player_uuid, None)
                 self._log("native_client_disconnected", target_uuid=player_uuid)
                 continue
             if kind == "paired":
@@ -2838,7 +2846,7 @@ class ZPReportAntiCheat(Plugin):
             data = event.get("data", {})
             if not isinstance(data, dict):
                 continue
-            self.native_client_connections[player_uuid] = float(event.get("at", time.time()))
+            self.native_client_last_seen[player_uuid] = float(event.get("at", time.time()))
             self.native_client_latest[player_uuid] = data
             integrity = data.get("integrity", {})
             if not isinstance(integrity, dict):
