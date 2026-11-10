@@ -84,6 +84,21 @@ class NativeClientSecurityTests(unittest.TestCase):
         changed = {**payload, "seq": 2, "signature": signature}
         self.assertFalse(NativeClientRegistry.verify_payload(token, changed, signature))
 
+    def test_native_bridge_refuses_plaintext_without_tls_files(self):
+        class Logger:
+            def info(self, message): pass
+            def warning(self, message): pass
+            def error(self, message): pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            registry = NativeClientRegistry(Path(directory) / "clients.json")
+            bridge = NativeClientBridge(
+                registry, queue.Queue(), "0.0.0.0", 0, "", "", Logger()
+            )
+            self.assertFalse(bridge.start())
+            self.assertIsNone(bridge.server)
+            bridge.stop()
+
     def test_pair_attempts_are_rate_limited_per_source_ip(self):
         class Logger:
             def info(self, message): pass
