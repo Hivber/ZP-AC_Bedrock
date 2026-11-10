@@ -264,7 +264,6 @@ class NativeAttestationService:
         challenge_id = str(payload.get("challenge_id", ""))
         nonce = str(payload.get("nonce", ""))
         now = self.clock()
-        now = self.clock()
         with self._lock:
             challenge = self._challenges.pop(challenge_id, None)
             record = self._registry.get(player_uuid)
