@@ -135,6 +135,9 @@ jobs:
           assert "EvidenceStore" in plugin
           assert "RuntimeMetrics" in plugin
           assert "summarize_mining_events" in plugin
+          assert "PacketSendEvent" in plugin
+          assert "outgoing_level_chunk_packets" in plugin
+          assert "outgoing_subchunk_packets" in plugin
           assert "security_max_bridge_payload_bytes" in plugin
           assert "def review(" in Path("plugins/endstone_zp_anticheat/evidence_store.py").read_text(encoding="utf-8")
           assert "def snapshot(" in Path("plugins/endstone_zp_anticheat/runtime_metrics.py").read_text(encoding="utf-8")
