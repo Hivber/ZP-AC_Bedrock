@@ -247,12 +247,23 @@ class NativeAttestationService:
                 "expires_in": int(self.challenge_ttl_seconds),
             }
 
-    def verify_attestation(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def verify_attestation(self, envelope: dict[str, Any]) -> dict[str, Any]:
+        encoded_payload = str(envelope.get("signed_payload", ""))
+        signature = str(envelope.get("signature", ""))
+        try:
+            signed_bytes = base64.b64decode(encoded_payload, validate=True)
+            if not signed_bytes or len(signed_bytes) > MAX_BODY_BYTES:
+                raise ValueError("invalid signed payload size")
+            payload = json.loads(signed_bytes.decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("signed payload must be an object")
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("invalid signed payload") from exc
         player_uuid = _canonical_uuid(payload.get("player_uuid"))
         key_id = str(payload.get("key_id", ""))
         challenge_id = str(payload.get("challenge_id", ""))
         nonce = str(payload.get("nonce", ""))
-        signature = str(payload.get("signature", ""))
+        now = self.clock()
         now = self.clock()
         with self._lock:
             challenge = self._challenges.pop(challenge_id, None)
@@ -270,11 +281,8 @@ class NativeAttestationService:
                 raise ValueError("invalid or replayed sequence")
             if payload.get("protocol") != PROTOCOL_VERSION:
                 raise ValueError("protocol mismatch")
-            signed_payload = {k: v for k, v in payload.items() if k != "signature"}
-            if len(canonical_json(signed_payload)) > MAX_BODY_BYTES:
-                raise ValueError("attestation payload too large")
             try:
-                _verify_signature(str(record["public_key_pem"]), canonical_json(signed_payload), signature)
+                _verify_signature(str(record["public_key_pem"]), signed_bytes, signature)
             except Exception as exc:
                 raise ValueError("invalid attestation signature") from exc
             capabilities = payload.get("capabilities", [])
