@@ -7,10 +7,34 @@ from pathlib import Path
 
 import queue
 
-from plugins.endstone_zp_anticheat.client_bridge import NativeClientBridge
-from plugins.endstone_zp_anticheat.client_security import (
-    NativeClientRegistry, PROTOCOL, validate_telemetry,
-)
+import importlib.util
+import sys
+import types
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_NAME = "_zp_ac_native_test_package"
+PACKAGE_PATH = ROOT / "plugins" / "endstone_zp_anticheat"
+package = types.ModuleType(PACKAGE_NAME)
+package.__path__ = [str(PACKAGE_PATH)]
+sys.modules.setdefault(PACKAGE_NAME, package)
+
+
+def load_package_module(name):
+    spec = importlib.util.spec_from_file_location(
+        PACKAGE_NAME + "." + name, PACKAGE_PATH / (name + ".py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+security = load_package_module("client_security")
+bridge_module = load_package_module("client_bridge")
+NativeClientBridge = bridge_module.NativeClientBridge
+NativeClientRegistry = security.NativeClientRegistry
+PROTOCOL = security.PROTOCOL
+validate_telemetry = security.validate_telemetry
 
 
 class NativeClientSecurityTests(unittest.TestCase):
