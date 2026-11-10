@@ -28,6 +28,7 @@ from endstone.event import (
     PlayerJoinEvent,
     PlayerLoginEvent,
     PlayerMoveEvent,
+    PlayerChatEvent,
     PlayerQuitEvent,
     PlayerRespawnEvent,
     PlayerTeleportEvent,
@@ -45,6 +46,7 @@ from .credit import PUBLIC_CREDIT_DEFAULT, PUBLIC_CREDIT_LOCK_THRESHOLD, accrue_
 from .evidence_store import EvidenceStore
 from .runtime_metrics import RuntimeMetrics
 from .mining_analysis import classify_mined_block, summarize_mining_events
+from .mute import DEFAULT_MUTE_DURATIONS_SECONDS, MuteStore
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -174,7 +176,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.7.0"
+    version = "0.8.0"
     commands = {
         "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
@@ -250,6 +252,7 @@ class ZPReportAntiCheat(Plugin):
             "ai_api_endpoint": "",
             "evidence_max_records": 10000,
             "security_max_bridge_payload_bytes": 8192,
+            "insult_mute_durations_seconds": list(DEFAULT_MUTE_DURATIONS_SECONDS),
         }
         changed = False
         for key, value in defaults.items():
@@ -274,6 +277,7 @@ class ZPReportAntiCheat(Plugin):
         )
         self._ai_last_analysis: dict[str, float] = {}
         self.report_cooldowns: dict[tuple[str, str], float] = {}
+        self.insult_report_cooldowns: dict[tuple[str, str], float] = {}
         self.packet_second: dict[str, dict[str, Any]] = {}
         self.break_events: dict[str, deque[float]] = defaultdict(deque)
         self.click_events: dict[str, deque[float]] = defaultdict(deque)
@@ -284,6 +288,11 @@ class ZPReportAntiCheat(Plugin):
         self.audit_path = Path(self.data_folder) / "evidence.jsonl"
         self.data_path = Path(self.data_folder)
         self.data_path.mkdir(parents=True, exist_ok=True)
+        mute_durations = self.cfg.get("insult_mute_durations_seconds", DEFAULT_MUTE_DURATIONS_SECONDS)
+        if not isinstance(mute_durations, (list, tuple)) or not mute_durations:
+            mute_durations = DEFAULT_MUTE_DURATIONS_SECONDS
+        self.mute_store = MuteStore(self.data_path / "muted_players.json", mute_durations)
+        self._mute_notice_last: dict[str, float] = {}
         self.evidence_store = EvidenceStore(
             self.data_path / "evidence_records.jsonl",
             self.data_path / "evidence_reviews.json",
@@ -977,10 +986,44 @@ class ZPReportAntiCheat(Plugin):
             sender.send_message("§c没有权限执行 ZP-AC 管理命令。需要 OP 或 zp_ac_admin 管理员标签。")
             return True
         if not args:
-            sender.send_message("§e用法：/zpac credit <玩家|UUID> | /zpac trust <玩家|UUID> | /zpac top [数量] | /zpac cloud <on|off|status|sync> | /zpac candidates | /zpac confirmban <UUID> | /zpac pardon <UUID>")
+            sender.send_message("§e用法：/zpac mute <玩家|UUID> | /zpac unmute <玩家|UUID> | /zpac credit <玩家|UUID> | /zpac trust <玩家|UUID> | /zpac top [数量] | /zpac cloud <on|off|status|sync> | /zpac candidates | /zpac confirmban <UUID> | /zpac pardon <UUID>")
             return True
         action = str(args[0]).lower()
         value = str(args[1]).strip() if len(args) > 1 else ""
+        if action == "mute":
+            player_uuid = self._resolve_player_uuid(value) if value else None
+            if not player_uuid:
+                sender.send_message("§e用法：/zpac mute <在线玩家名|UUID>。")
+                return True
+            record = self.mute_store.get(player_uuid)
+            remaining = max(0, int(float(record["muted_until"]) - time.time()))
+            if remaining > 0:
+                sender.send_message(
+                    f"§e该玩家当前处于禁言状态；剩余 {max(1, (remaining + 59) // 60)} 分钟；"
+                    f"累计辱骂举报 {record['violation_count']} 次。"
+                )
+            else:
+                sender.send_message(f"§a该玩家当前未禁言；累计辱骂举报 {record['violation_count']} 次。")
+            return True
+
+        if action == "unmute":
+            player_uuid = self._resolve_player_uuid(value) if value else None
+            if not player_uuid:
+                sender.send_message("§e用法：/zpac unmute <在线玩家名|UUID>。")
+                return True
+            if not self.mute_store.unmute(player_uuid):
+                sender.send_message("§e该玩家没有可解除的禁言记录。")
+                return True
+            target = next((p for p in list(self.server.online_players) if _player_key(p) == player_uuid), None)
+            if target is not None:
+                try:
+                    target.send_message("§a管理员已解除你的聊天禁言。")
+                except Exception:
+                    pass
+            sender.send_message("§a已解除该玩家禁言；历史违规次数保留，后续辱骂举报仍按累计次数递增。")
+            self._log("insult_mute_admin_unmute", target_uuid=player_uuid, action="unmute_keep_violation_count")
+            return True
+
         if action == "credit":
             if not self._is_admin_sender(sender):
                 sender.send_message("§c没有权限查询其他玩家的公开信用分。")
@@ -1731,6 +1774,11 @@ class ZPReportAntiCheat(Plugin):
         reporter_key = _player_key(reporter) or reporter_name.casefold()
         cooldown_key = (target_key or target_name.casefold(), reporter_key)
         cooldown = float(self.cfg.get("reporter_target_cooldown_seconds", 600))
+        previous_insult_report_at = self.insult_report_cooldowns.get(cooldown_key)
+        mute_report_allowed = (
+            previous_insult_report_at is None
+            or now - previous_insult_report_at >= cooldown
+        )
         session = self.sessions.get(target_key or "")
         if session is not None:
             # 同一举报者冷却期内重复提交，只更新理由/记录，不增加独立举报人数。
@@ -1754,6 +1802,22 @@ class ZPReportAntiCheat(Plugin):
             is_new_reporter = True
 
         self.report_cooldowns[cooldown_key] = now
+        if category == "辱骂":
+            self.insult_report_cooldowns[cooldown_key] = now
+            if mute_report_allowed:
+                self._apply_insult_report_mute(reporter, target, reason, report_id)
+            else:
+                try:
+                    reporter.send_message("§e该目标的辱骂举报仍在 10 分钟冷却期内，本次已记录但不会重复增加禁言等级。")
+                except Exception:
+                    pass
+                self._log(
+                    "insult_report_mute_cooldown",
+                    target_uuid=target_key,
+                    reporter_uuid=reporter_key,
+                    report_id=report_id,
+                    action="no_repeat_escalation_within_report_cooldown",
+                )
         tier = self._tier(len(session["reporters"]))
         self._admin_alert(
             f"已接收举报：§e{target_name}§r；独立举报者 {len(session['reporters'])} 人；检测等级 T{tier}。"
@@ -1772,6 +1836,72 @@ class ZPReportAntiCheat(Plugin):
             report_id=report_id,
             new_distinct_reporter=is_new_reporter,
         )
+
+    def _apply_insult_report_mute(
+        self, reporter: Any, target: Any, reason: str, report_id: str
+    ) -> None:
+        target_uuid = _player_key(target)
+        if not target_uuid:
+            return
+        result = self.mute_store.record_violation(target_uuid)
+        count = int(result["violation_count"])
+        duration = int(result["duration_seconds"])
+        until = float(result["muted_until"])
+        remaining_minutes = max(1, int((until - time.time() + 59) // 60))
+        if duration >= 3600:
+            duration_label = f"{duration // 3600} 小时"
+        else:
+            duration_label = f"{duration // 60} 分钟"
+        try:
+            target.send_message(
+                f"§c你因收到辱骂行为举报，已被系统禁言 {duration_label}。"
+                f"§7累计次数：{count}；剩余约 {remaining_minutes} 分钟。"
+                "如有异议，请联系管理员复核。"
+            )
+        except Exception:
+            pass
+        try:
+            reporter.send_message(
+                f"§a辱骂举报已提交，目标玩家已立即禁言 {duration_label}。"
+                f"§7该玩家累计辱骂举报次数：{count}。"
+            )
+        except Exception:
+            pass
+        self._admin_alert(
+            f"§c辱骂举报触发即时禁言§r：§e{_player_name(target)}§r；"
+            f"举报者：{_player_name(reporter)}；累计次数 {count}；本次时长 {duration_label}。"
+        )
+        self._log(
+            "insult_report_mute_applied",
+            target_uuid=target_uuid,
+            reporter_uuid=_player_key(reporter),
+            violation_count=count,
+            duration_seconds=duration,
+            muted_until=until,
+            reason=_clean(reason, 200),
+            report_id=_clean(report_id, 80),
+            action="mute_chat_only",
+        )
+
+    @event_handler
+    def on_player_chat(self, event: PlayerChatEvent) -> None:
+        player = event.player
+        player_uuid = _player_key(player)
+        if not player_uuid or not self.mute_store.is_muted(player_uuid):
+            return
+        event.is_cancelled = True
+        now_mono = time.monotonic()
+        if now_mono - self._mute_notice_last.get(player_uuid, 0.0) < 3.0:
+            return
+        self._mute_notice_last[player_uuid] = now_mono
+        record = self.mute_store.get(player_uuid)
+        remaining = max(1, int((float(record["muted_until"]) - time.time() + 59) // 60))
+        try:
+            player.send_message(
+                f"§c你目前处于禁言状态，无法发送聊天消息。§7剩余约 {remaining} 分钟。"
+            )
+        except Exception:
+            pass
 
     # ----------------------------- movement checks -----------------------------
 
