@@ -179,7 +179,10 @@ class NativeAttestationService:
         if _key_id_from_pem(pem) != key_id:
             raise ValueError("key id does not match public key")
         message = f"zp-ac-enroll-v1|{player_uuid}|{key_id}|{code}".encode("utf-8")
-        _verify_signature(pem, message, str(payload.get("proof", "")))
+        try:
+            _verify_signature(pem, message, str(payload.get("proof", "")))
+        except Exception as exc:
+            raise ValueError("invalid enrollment proof") from exc
         now = self.clock()
         with self._lock:
             if player_uuid not in self._online:
@@ -220,6 +223,11 @@ class NativeAttestationService:
                 raise ValueError("player is not online")
             if not record or not secrets.compare_digest(str(record.get("key_id", "")), str(key_id)):
                 raise ValueError("native client is not paired")
+            for stale_id, stale in list(self._challenges.items()):
+                if stale["expires_at"] <= now:
+                    self._challenges.pop(stale_id, None)
+            if len(self._challenges) >= 4096:
+                raise ValueError("too many pending challenges")
             sequence = int(record.get("last_sequence", 0)) + 1
             challenge_id = secrets.token_urlsafe(18)
             nonce = secrets.token_urlsafe(32)
@@ -265,7 +273,10 @@ class NativeAttestationService:
             signed_payload = {k: v for k, v in payload.items() if k != "signature"}
             if len(canonical_json(signed_payload)) > MAX_BODY_BYTES:
                 raise ValueError("attestation payload too large")
-            _verify_signature(str(record["public_key_pem"]), canonical_json(signed_payload), signature)
+            try:
+                _verify_signature(str(record["public_key_pem"]), canonical_json(signed_payload), signature)
+            except Exception as exc:
+                raise ValueError("invalid attestation signature") from exc
             capabilities = payload.get("capabilities", [])
             integrity = payload.get("integrity", {})
             if not isinstance(capabilities, list) or len(capabilities) > 32:
