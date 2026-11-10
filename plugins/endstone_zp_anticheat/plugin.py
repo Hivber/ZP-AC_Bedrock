@@ -1032,10 +1032,51 @@ class ZPReportAntiCheat(Plugin):
             sender.send_message("§c没有权限执行 ZP-AC 管理命令。需要 OP 或 zp_ac_admin 管理员标签。")
             return True
         if not args:
-            sender.send_message("§e用法：/zpac mute <玩家|UUID> | /zpac unmute <玩家|UUID> | /zpac credit <玩家|UUID> | /zpac trust <玩家|UUID> | /zpac top [数量] | /zpac cloud <on|off|status|sync> | /zpac candidates | /zpac confirmban <UUID> | /zpac pardon <UUID>")
+            sender.send_message("§e用法：/zpac clientstatus | clientpair <在线玩家> | clientrevoke <玩家|UUID> | mute/unmute/credit/trust/...")
             return True
         action = str(args[0]).lower()
         value = str(args[1]).strip() if len(args) > 1 else ""
+        if action == "clientstatus":
+            status = self.native_client_bridge.status()
+            sender.send_message(
+                "§8[§bZP-AC 客户端检测§8]\n"
+                "§f基岩版附加包模式：§a运行中（服务端行为采样，不是客户端内存检测）\n"
+                f"§f原生客户端桥接：§{'a' if status['enabled'] else 'e'}{'已监听' if status['enabled'] else '未启用'}\n"
+                f"§f监听地址：§7{status['host']}:{status['port']}\n"
+                f"§f已配对设备：§e{self.native_client_registry.paired_count()}\n"
+                f"§f当前连接设备：§e{len(self.native_client_connections)}\n"
+                + (f"§c状态：{status['error']}" if status["error"] else "")
+            )
+            return True
+        if action == "clientpair":
+            target = self._find_online_player(value) if value else None
+            target_uuid = _player_key(target) if target is not None else None
+            if not target_uuid:
+                sender.send_message("§e用法：/zpac clientpair <在线玩家名>。")
+                return True
+            if not self.native_client_bridge.status()["enabled"]:
+                sender.send_message("§c原生客户端桥接未启用。请先配置 TLS 证书/私钥并启用 native_client_bridge_enabled。")
+                return True
+            code = self.native_client_registry.create_pair_code(target_uuid)
+            try:
+                target.send_message(f"§b[ZP-AC] 原生客户端配对码：§e{code}§b，有效期 5 分钟；请在 ZP-AC 客户端中输入。请勿转发给他人。")
+            except Exception:
+                sender.send_message("§c无法向目标玩家发送配对码。")
+                return True
+            sender.send_message(f"§a已向 {_clean(getattr(target, 'name', ''), 32)} 私发一次性配对码，有效期 5 分钟。")
+            self._log("native_client_pair_code_issued", target_uuid=target_uuid, expires_in_seconds=300)
+            return True
+        if action == "clientrevoke":
+            target_uuid = self._resolve_player_uuid(value) if value else None
+            if not target_uuid:
+                sender.send_message("§e用法：/zpac clientrevoke <在线玩家名|UUID>。")
+                return True
+            removed = self.native_client_registry.revoke_player(target_uuid)
+            self.native_client_connections.pop(target_uuid, None)
+            self.native_client_latest.pop(target_uuid, None)
+            sender.send_message(f"§a已撤销该 UUID 的 {removed} 个原生客户端配对令牌。")
+            self._log("native_client_tokens_revoked", target_uuid=target_uuid, revoked_count=removed)
+            return True
         if action == "mute":
             player_uuid = self._resolve_player_uuid(value) if value else None
             if not player_uuid:
@@ -2770,12 +2811,81 @@ class ZPReportAntiCheat(Plugin):
         )
         self.sessions.pop(session["target_uuid"], None)
 
+    def _drain_native_client_events(self) -> None:
+        for _ in range(100):
+            try:
+                event = self._native_client_events.get_nowait()
+            except queue.Empty:
+                break
+            kind = str(event.get("kind", ""))
+            player_uuid = str(event.get("player_uuid", ""))
+            if not player_uuid:
+                continue
+            if kind == "connected":
+                self.native_client_connections[player_uuid] = float(event.get("at", time.time()))
+                self._log("native_client_connected", target_uuid=player_uuid)
+                continue
+            if kind == "disconnected":
+                self.native_client_connections.pop(player_uuid, None)
+                self._log("native_client_disconnected", target_uuid=player_uuid)
+                continue
+            if kind == "paired":
+                self._log("native_client_paired", target_uuid=player_uuid)
+                continue
+            if kind != "telemetry":
+                continue
+            data = event.get("data", {})
+            if not isinstance(data, dict):
+                continue
+            self.native_client_connections[player_uuid] = float(event.get("at", time.time()))
+            self.native_client_latest[player_uuid] = data
+            integrity = data.get("integrity", {})
+            if not isinstance(integrity, dict):
+                continue
+            suspicious = [
+                key for key in ("app_signature_valid", "package_name_valid")
+                if integrity.get(key) is False
+            ]
+            suspicious.extend(
+                key for key in ("debugger_detected", "root_detected", "emulator_detected", "tamper_detected")
+                if integrity.get(key) is True
+            )
+            if not suspicious:
+                continue
+            detail = "原生客户端自报完整性异常：" + ", ".join(suspicious)
+            self.evidence_store.append({
+                "target_uuid": player_uuid,
+                "rule": "native_client_integrity_advisory",
+                "code": "native_client_integrity_advisory",
+                "severity": "warning",
+                "confidence": "low",
+                "high_confidence": False,
+                "source": "native_client_self_report",
+                "detail": detail,
+                "client_version": _clean(data.get("client_version"), 32),
+                "build_id": _clean(data.get("build_id"), 64),
+                "platform": _clean(data.get("platform"), 24),
+                "matched_checks": suspicious,
+                "action": "review_only_no_punishment",
+            })
+            self._log(
+                "native_client_integrity_advisory",
+                target_uuid=player_uuid,
+                checks=suspicious,
+                action="review_only_no_punishment",
+            )
+            self._admin_alert(
+                f"§e原生客户端完整性提示§r：UUID §7{player_uuid[:12]}…§r；"
+                f"{detail}。该结果来自客户端自报，不会自动处罚。"
+            )
+
     # ----------------------------- session lifecycle -----------------------------
 
     def _pulse(self) -> None:
         pulse_started = time.perf_counter()
         self.metrics.increment("pulse_runs")
         self._drain_cloud_results()
+        self._drain_native_client_events()
         now = time.monotonic()
         self._sync_operator_admin_tags()
         if bool(self.cfg.get("behavior_pack_bridge_enabled", True)) and now - self._bp_last_ready >= 30.0:
