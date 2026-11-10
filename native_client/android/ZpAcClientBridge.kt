@@ -85,7 +85,7 @@ class ZpAcClientBridge(
             .put("type", "telemetry")
             .put("session_id", activeSession)
             .put("seq", sequence)
-            .put("timestamp", System.currentTimeMillis() / 1000.0)
+            .put("timestamp", System.currentTimeMillis() / 1000)
             .put("data", JSONObject()
                 .put("client_version", clientVersion)
                 .put("build_id", buildId)
