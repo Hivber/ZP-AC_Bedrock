@@ -99,6 +99,10 @@ jobs:
           assert "native_client_bridge_enabled" in config
           assert "native_client_tls_cert" in config
           assert "NativeClientRegistry" in Path("plugins/endstone_zp_anticheat/client_security.py").read_text(encoding="utf-8")
+          assert "allow_pair_attempt" in Path("plugins/endstone_zp_anticheat/client_bridge.py").read_text(encoding="utf-8")
+          assert "test_pair_attempts_are_rate_limited_per_source_ip" in Path("tests/test_client_security.py").read_text(encoding="utf-8")
+          assert "clientrevoke" in plugin
+          assert "review_only_no_punishment" in plugin
           assert "TLS-only native client transport" in Path("plugins/endstone_zp_anticheat/client_bridge.py").read_text(encoding="utf-8")
           assert "test_pair_code_is_single_use_and_token_is_not_persisted" in Path("tests/test_client_security.py").read_text(encoding="utf-8")
           assert "ZpAcClientBridge" in Path("native_client/android/ZpAcClientBridge.kt").read_text(encoding="utf-8")
