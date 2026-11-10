@@ -439,6 +439,7 @@ class ZPReportAntiCheat(Plugin):
                 build_id=result.get("build_id", ""),
                 capabilities=result.get("capabilities", []),
                 integrity_claims=claims,
+                telemetry=result.get("telemetry", {}),
                 action="signature_verified_telemetry_only_no_automatic_punishment",
             )
             failed_claims = sorted(key for key, value in claims.items() if value is False)
