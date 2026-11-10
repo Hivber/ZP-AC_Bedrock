@@ -13,7 +13,7 @@ DIST = ROOT / "dist"
 ADDON_DIR = ROOT / "mcaddon"
 RESOURCE_DIR = ROOT / "resource_pack"
 ADDON_OUTPUT = DIST / "ZP-AC-2.1.9.mcaddon"
-WHEEL_PATTERN = "endstone_zp_report_anticheat-0.9.0-*.whl"
+WHEEL_PATTERN = "endstone_zp_report_anticheat-1.0.0-*.whl"
 
 BP_PREFIX = "behavior_pack/"
 RP_PREFIX = "resource_pack/"
@@ -48,6 +48,8 @@ def main() -> int:
         ROOT / "plugins" / "endstone_zp_anticheat" / "plugin.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "mute.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "chat_moderation.py",
+        ROOT / "plugins" / "endstone_zp_anticheat" / "client_security.py",
+        ROOT / "plugins" / "endstone_zp_anticheat" / "client_bridge.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "policy.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "credit.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "movement.py",
@@ -126,7 +128,7 @@ def main() -> int:
 
     wheels = sorted(DIST.glob(WHEEL_PATTERN))
     if len(wheels) != 1:
-        raise SystemExit(f"Expected exactly one 0.9.0 wheel, found {len(wheels)}")
+        raise SystemExit(f"Expected exactly one 1.0.0 wheel, found {len(wheels)}")
 
     print(f"Created and validated: {ADDON_OUTPUT.relative_to(ROOT)}")
     print(f"Created: {wheels[0].relative_to(ROOT)}")
