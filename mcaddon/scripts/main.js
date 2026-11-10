@@ -363,6 +363,7 @@ function startMonitoring(player, report) {
     target: session.playerName,
     targetId: session.playerId,
     reporter: reporterName || "未知",
+    category: cleanText(report.category, 32) || "其他",
     reason: reason || "未填写",
     reportId
   });
@@ -724,6 +725,7 @@ function handleScriptEvent(event) {
     targetId: cleanText(data.targetId, 128),
     targetName: cleanText(data.targetName, 64),
     reporterName: cleanText(data.reporterName, 64),
+    category: cleanText(data.category, 32),
     reason: cleanText(data.reason, 180),
     reportId: cleanText(data.reportId, 80)
   };
