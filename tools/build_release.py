@@ -13,7 +13,7 @@ DIST = ROOT / "dist"
 ADDON_DIR = ROOT / "mcaddon"
 RESOURCE_DIR = ROOT / "resource_pack"
 ADDON_OUTPUT = DIST / "ZP-AC-2.1.9.mcaddon"
-WHEEL_PATTERN = "endstone_zp_report_anticheat-0.6.9-*.whl"
+WHEEL_PATTERN = "endstone_zp_report_anticheat-0.7.0-*.whl"
 
 BP_PREFIX = "behavior_pack/"
 RP_PREFIX = "resource_pack/"
@@ -49,6 +49,9 @@ def main() -> int:
         ROOT / "plugins" / "endstone_zp_anticheat" / "policy.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "credit.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "movement.py",
+        ROOT / "plugins" / "endstone_zp_anticheat" / "evidence_store.py",
+        ROOT / "plugins" / "endstone_zp_anticheat" / "runtime_metrics.py",
+        ROOT / "plugins" / "endstone_zp_anticheat" / "mining_analysis.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "config.toml",
         ROOT / "plugins" / "endstone_zp_anticheat" / "ai" / "engine.py",
         ROOT / "plugins" / "endstone_zp_anticheat" / "ai" / "onnx_engine.py",
