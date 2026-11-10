@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -257,7 +258,7 @@ class NativeAttestationService:
             if not record or record.get("key_id") != key_id:
                 raise ValueError("native client key is not registered")
             sequence = int(payload.get("sequence", -1))
-            if sequence != challenge["sequence"] or sequence <= int(record.get("last_sequence", 0)):
+            if type(payload.get("sequence")) is not int or sequence != challenge["sequence"] or sequence <= int(record.get("last_sequence", 0)):
                 raise ValueError("invalid or replayed sequence")
             if payload.get("protocol") != PROTOCOL_VERSION:
                 raise ValueError("protocol mismatch")
@@ -283,7 +284,9 @@ class NativeAttestationService:
             for key, value in telemetry.items():
                 if not isinstance(key, str):
                     continue
-                if isinstance(value, (bool, int, float)):
+                if isinstance(value, bool) or isinstance(value, int):
+                    safe_telemetry[key[:48]] = value
+                elif isinstance(value, float) and math.isfinite(value):
                     safe_telemetry[key[:48]] = value
                 elif isinstance(value, str):
                     safe_telemetry[key[:48]] = value[:96]
