@@ -1072,9 +1072,10 @@ class ZPReportAntiCheat(Plugin):
                 sender.send_message("§e用法：/zpac clientrevoke <在线玩家名|UUID>。")
                 return True
             removed = self.native_client_registry.revoke_player(target_uuid)
+            disconnected = self.native_client_bridge.disconnect_player(target_uuid)
             self.native_client_connections.pop(target_uuid, None)
             self.native_client_latest.pop(target_uuid, None)
-            sender.send_message(f"§a已撤销该 UUID 的 {removed} 个原生客户端配对令牌。")
+            sender.send_message(f"§a已撤销该 UUID 的 {removed} 个原生客户端配对令牌，并断开 {disconnected} 个活动连接。")
             self._log("native_client_tokens_revoked", target_uuid=target_uuid, revoked_count=removed)
             return True
         if action == "mute":
