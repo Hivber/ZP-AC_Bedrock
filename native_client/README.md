@@ -82,9 +82,14 @@ bridge.sendTelemetry(
     buildId = BuildConfig.VERSION_CODE.toString(),
     integrity = snapshot.integrity,
     runtime = snapshot.runtime,
+    gameTelemetry = JSONObject()
+        .put("client_pos_x", gamePosition.x)
+        .put("client_pos_y", gamePosition.y)
+        .put("client_pos_z", gamePosition.z)
+        .put("network_rtt_ms", measuredRttMs),
 )
 ```
 
-Call `sendTelemetry` periodically (the transport accepts at most one report per second; a 10-second interval is recommended), and close/reconnect when the app returns from background or the network changes. The host app must obtain the expected signer fingerprint from its release APK signing certificate and pin the server certificate fingerprint out-of-band.
+Call `sendTelemetry` periodically (the transport accepts at most one report per second; a 10-second interval is recommended), and close/reconnect when the app returns from background or the network changes. The optional gameTelemetry object may contain the latest client-side position and measured RTT. Endstone compares it to the authoritative server position as low-confidence review evidence only. The host app must obtain the expected signer fingerprint from its release APK signing certificate and pin the server certificate fingerprint out-of-band.
 
 These Android checks are heuristics: root/debugger/emulator signals can be false positives or hidden, and a modified client can falsify all local results. This SDK does not inspect Minecraft memory, native game code, other processes, or gameplay input. Actual gameplay anti-cheat remains server-authoritative.
