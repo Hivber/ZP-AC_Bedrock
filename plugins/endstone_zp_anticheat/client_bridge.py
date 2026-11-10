@@ -182,9 +182,11 @@ class NativeClientBridge:
             return True
         if self.certificate is None or self.private_key is None:
             self.error = "TLS certificate/private key not configured"
+            self.logger.warning("ZP-AC 原生客户端桥接已启用但未配置 TLS 证书/私钥；监听保持关闭。")
             return False
         if not self.certificate.is_file() or not self.private_key.is_file():
             self.error = "TLS certificate/private key file missing"
+            self.logger.warning("ZP-AC 原生客户端桥接 TLS 文件不存在；监听保持关闭。")
             return False
         try:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
