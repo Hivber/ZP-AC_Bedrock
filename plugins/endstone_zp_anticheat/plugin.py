@@ -2827,6 +2827,10 @@ class ZPReportAntiCheat(Plugin):
             if not player_uuid:
                 continue
             if kind == "connected":
+                if not any(_player_key(player) == player_uuid for player in list(self.server.online_players)):
+                    self.native_client_bridge.disconnect_player(player_uuid)
+                    self._log("native_client_rejected_offline_player", target_uuid=player_uuid)
+                    continue
                 self.native_client_connections[player_uuid] = self.native_client_connections.get(player_uuid, 0) + 1
                 self.native_client_last_seen[player_uuid] = float(event.get("at", time.time()))
                 self._log("native_client_connected", target_uuid=player_uuid)
@@ -2844,6 +2848,9 @@ class ZPReportAntiCheat(Plugin):
                 self._log("native_client_paired", target_uuid=player_uuid)
                 continue
             if kind != "telemetry":
+                continue
+            if not any(_player_key(player) == player_uuid for player in list(self.server.online_players)):
+                self._log("native_client_telemetry_ignored_offline_player", target_uuid=player_uuid)
                 continue
             data = event.get("data", {})
             if not isinstance(data, dict):
