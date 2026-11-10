@@ -61,6 +61,10 @@ class _ClientHandler(socketserver.StreamRequestHandler):
             if not first or first.get("protocol") != PROTOCOL:
                 return
             if first.get("type") == "pair":
+                remote_ip = str(self.client_address[0]) if self.client_address else "unknown"
+                if not owner.allow_pair_attempt(remote_ip):
+                    self._send({"type": "error", "code": "pair_rate_limited"})
+                    return
                 paired = owner.registry.consume_pair_code(
                     str(first.get("code", "")), str(first.get("client_id", ""))
                 )
@@ -176,6 +180,24 @@ class NativeClientBridge:
         self.error = ""
         self._connection_lock = threading.RLock()
         self._active_sockets: dict[str, set[Any]] = {}
+        self._pair_attempts: dict[str, tuple[float, int]] = {}
+
+    def allow_pair_attempt(self, remote_ip: str, now: float | None = None) -> bool:
+        current = time.monotonic() if now is None else float(now)
+        with self._connection_lock:
+            started, attempts = self._pair_attempts.get(remote_ip, (current, 0))
+            if current - started >= 300.0:
+                started, attempts = current, 0
+            if attempts >= 8:
+                self._pair_attempts[remote_ip] = (started, attempts)
+                return False
+            self._pair_attempts[remote_ip] = (started, attempts + 1)
+            if len(self._pair_attempts) > 4096:
+                self._pair_attempts = {
+                    ip: value for ip, value in self._pair_attempts.items()
+                    if current - value[0] < 300.0
+                }
+            return True
 
     def start(self) -> bool:
         if self.server is not None:
