@@ -187,7 +187,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v5
         with:
-          name: ZP-AC-2.1.9-and-Endstone-0.8.0
+          name: ZP-AC-2.1.9-and-Endstone-0.9.0
           path: |
             dist/*.mcaddon
             dist/*.whl
