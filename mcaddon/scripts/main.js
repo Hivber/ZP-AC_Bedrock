@@ -12,7 +12,7 @@ import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/serve
 
 /*
  * ZP-AC Bedrock Core | Minecraft Bedrock 1.26.60
- * Behavior Pack 2.1.7 | @minecraft/server 2.10.0
+ * Behavior Pack 2.1.9 | @minecraft/server 2.10.0
  *
  * Design:
  * - Script API runs in the world/server script environment, not inside each remote player's client process.
