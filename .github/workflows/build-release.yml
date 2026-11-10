@@ -63,9 +63,14 @@ jobs:
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
           assert project["project"]["version"] == "0.6.9"
           assert 'version = "0.6.9"' in plugin
-          assert resource_manifest["header"]["version"] == [1, 0, 0]
+          assert resource_manifest["header"]["version"] == [1, 1, 0]
           assert resource_manifest["header"]["min_engine_version"] == [1, 26, 60]
           assert resource_manifest["modules"][0]["type"] == "resources"
+          ui_defs = json.loads(Path("resource_pack/ui/_ui_defs.json").read_text(encoding="utf-8"))
+          ui_json = json.loads(Path("resource_pack/ui/server_form.json").read_text(encoding="utf-8"))
+          assert "ui/server_form.json" in ui_defs["ui_defs"]
+          assert ui_json["namespace"] == "server_form"
+          assert "long_form_panel" in ui_json and "custom_form_panel" in ui_json
           languages = json.loads(Path("resource_pack/texts/languages.json").read_text(encoding="utf-8"))
           assert languages == ["zh_CN", "en_US"]
           zh = Path("resource_pack/texts/zh_CN.lang").read_text(encoding="utf-8")
@@ -80,6 +85,10 @@ jobs:
           assert 'command: "zp_ac:ba"' in script
           assert "查看我的信用分" in script
           assert "举报其他玩家" in script
+          assert "textures/ui/icon_credit.png" in script
+          assert "textures/ui/icon_report.png" in script
+          assert "ZP 玩家举报系统" in script
+          assert "ZP 我的信用分" in script
           assert "function openBaMenu(player)" in script
           assert "[REPORT_UI_CONFIG.command]: (player) => openBaMenu(player)" in script
           assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
