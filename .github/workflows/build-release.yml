@@ -61,8 +61,8 @@ jobs:
           assert manifest["header"]["version"] == [2, 1, 9]
           assert manifest["modules"][0]["version"] == [2, 1, 9]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.7.0"
-          assert 'version = "0.7.0"' in plugin
+          assert project["project"]["version"] == "0.8.0"
+          assert 'version = "0.8.0"' in plugin
           assert resource_manifest["header"]["version"] == [1, 0, 0]
           assert resource_manifest["header"]["min_engine_version"] == [1, 26, 60]
           assert resource_manifest["modules"][0]["type"] == "resources"
@@ -86,6 +86,14 @@ jobs:
           for category in ("恶意破坏", "攻击玩家", "辱骂", "外挂", "透视", "其他"):
               assert category in script
           assert "category=category" in plugin
+          assert "PlayerChatEvent" in plugin
+          assert 'if category == "辱骂":' in plugin
+          assert "def on_player_chat(" in plugin
+          assert "event.is_cancelled = True" in plugin
+          assert "MuteStore" in plugin
+          assert "insult_mute_durations_seconds" in config
+          assert "def duration_for_violation(" in Path("plugins/endstone_zp_anticheat/mute.py").read_text(encoding="utf-8")
+          assert "test_first_report_mutes_immediately_and_increases_on_repeats" in Path("tests/test_mute.py").read_text(encoding="utf-8")
           assert "function openBaMenu(player)" in script
           assert "[REPORT_UI_CONFIG.command]: (player) => openBaMenu(player)" in script
           assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
