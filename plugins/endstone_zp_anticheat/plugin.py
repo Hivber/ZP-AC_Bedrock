@@ -1041,7 +1041,8 @@ class ZPReportAntiCheat(Plugin):
             status = self.native_client_bridge.status()
             sender.send_message(
                 "§8[§bZP-AC 客户端检测§8]\n"
-                "§f基岩版附加包模式：§a运行中（服务端行为采样，不是客户端内存检测）\n"
+                "§fEndstone 服务端检测：§a运行中（权威检测）\n"
+                f"§f行为包桥接：§{'a' if time.monotonic() - self._bp_last_ready < 90.0 else 'e'}{'在线' if time.monotonic() - self._bp_last_ready < 90.0 else '未连接'}（Script API 服务端事件）\n"
                 f"§f原生客户端桥接：§{'a' if status['enabled'] else 'e'}{'已监听' if status['enabled'] else '未启用'}\n"
                 f"§f监听地址：§7{status['host']}:{status['port']}\n"
                 f"§f已配对设备：§e{self.native_client_registry.paired_count()}\n"
