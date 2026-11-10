@@ -346,6 +346,7 @@ function startMonitoring(player, report) {
   session.reportCount += 1;
   const reporterName = cleanText(report.reporterName, 64);
   const reason = cleanText(report.reason, 180);
+  const category = cleanText(report.category, 32) || "其他";
   const reportId = cleanText(report.reportId, 80);
   if (reporterName && !session.reporters.includes(reporterName)) {
     session.reporters.push(reporterName);
@@ -369,7 +370,7 @@ function startMonitoring(player, report) {
   });
 
   if (!isPluginOnline()) {
-    notifyAdmins(`收到举报并提高观察优先级：§e${session.playerName}§r；累计举报 ${session.reportCount} 次${reason ? `；原因：${reason}` : ""}。全员基础检测始终运行。`);
+    notifyAdmins(`收到举报并提高观察优先级：§e${session.playerName}§r；类型：${category}；累计举报 ${session.reportCount} 次${reason ? `；补充原因：${reason}` : ""}。全员基础检测始终运行。`);
   }
 }
 
