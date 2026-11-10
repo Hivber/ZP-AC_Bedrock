@@ -166,3 +166,14 @@ evidence_max_records = 10000
 
 # ScriptEvent 桥接输入上限，超限消息直接拒绝。
 security_max_bridge_payload_bytes = 8192
+
+# 双模式客户端检测：Bedrock 附加包模式始终使用服务端事件采样；
+# 原生客户端桥接为可选项，默认关闭，必须配置 TLS 证书和私钥才会监听。
+native_client_bridge_enabled = false
+native_client_bridge_host = "0.0.0.0"
+native_client_bridge_port = 49376
+# 使用服务器证书链文件和私钥文件的绝对路径；禁止明文 TCP。
+native_client_tls_cert = ""
+native_client_tls_key = ""
+# 每个 Bedrock UUID 最多允许配对的原生设备数，范围 1-10。
+native_client_max_tokens_per_player = 3
