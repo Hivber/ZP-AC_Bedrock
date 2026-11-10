@@ -4,14 +4,14 @@ ZP-AC 是一套面向 Minecraft Bedrock 1.26.60 的反作弊系统，采用**一
 
 - 行为包：2.1.9。无插件时独立运行，负责基础行为采样、本地历史记录、举报 UI、管理员面板和可配置检测开关。
 - 配套资源包：1.0.0。提供 ZP-AC 品牌标志、盾牌、信用分、举报及菜单纹理，与行为包一起包含在单一 `.mcaddon` 中；当前作为可复用纹理素材，不会自动改写原版 ActionForm 样式。
-- Endstone 增强插件：0.9.0。增加基于近期聊天证据验证的辱骂举报禁言、逐次递增时长、UUID 持久化禁言状态和聊天事件拦截。增加结构化证据中心、管理员复核标记、玩家档案查询、运行性能指标、ScriptEvent 输入大小限制与增强矿物开采模式分析；原有服务端检测、UUID 持久化画像、待复核候选、可选自动踢出、人工确认永久封禁和可选云端 UUID 同步保持不变。
+- Endstone 增强插件：1.0.0。增加基于近期聊天证据验证的辱骂举报禁言、逐次递增时长、UUID 持久化禁言状态和聊天事件拦截。增加结构化证据中心、管理员复核标记、玩家档案查询、运行性能指标、ScriptEvent 输入大小限制与增强矿物开采模式分析；原有服务端检测、UUID 持久化画像、待复核候选、可选自动踢出、人工确认永久封禁和可选云端 UUID 同步保持不变。
 - 云端功能默认关闭；云端仅同步 UUID，不上传玩家名称、XUID、可信分、风险分或证据正文。
 
 ## 部署
 
 1. 将构建产物 `ZP-AC-2.1.9.mcaddon` 导入 Minecraft/Bedrock 服务端，并在目标世界启用行为包。
-2. 将 `endstone_zp_report_anticheat-0.9.0-py3-none-any.whl` 安装到 Endstone 0.11.15 / Python 3.11 环境。
-3. 重启服务器，确认日志中出现 ZP-AC 0.9.0 启用信息和行为包握手信息。
+2. 将 `endstone_zp_report_anticheat-1.0.0-py3-none-any.whl` 安装到 Endstone 0.11.15 / Python 3.11 环境。
+3. 重启服务器，确认日志中出现 ZP-AC 1.0.0 启用信息和行为包握手信息。
 
 兼容基线：Minecraft Bedrock 1.26.60.6、Protocol 2225、Endstone 0.11.15、Python 3.11、`@minecraft/server` 2.10.0、`@minecraft/server-ui` 2.2.0。
 
@@ -45,7 +45,7 @@ ZP-AC 是一套面向 Minecraft Bedrock 1.26.60 的反作弊系统，采用**一
 
 管理员主菜单新增“反作弊检测功能开关”，管理员可单独启用/关闭移动速度、飞行/悬浮、超距攻击、多目标战斗、连点器、自动搭路和快速破坏方块检测、矿物透视异常定向采矿检测。新安装默认全部启用；选择保存在世界动态属性中，插件在线时由管理员 UI 同步保存，插件重连时行为包会重新同步。快速破坏方块检测和矿物透视异常定向采矿检测仅由 Endstone 增强层提供。矿物透视检测分析服务端记录的岩石/矿物开采比例、稀有矿物数量及空间分布；无法直接读取玩家客户端是否安装透视模组，因此只生成低权重辅助证据，不会单独触发自动踢出或永久封禁。原有插件增强管理菜单仍可查看待复核候选、查询隐藏画像、人工确认永久封禁、撤销 UUID 封禁和管理云端同步。
 
-## 聊天证据验证式辱骂禁言（Endstone 0.9.0）
+## 聊天证据验证式辱骂禁言（Endstone 1.0.0）
 
 - 玩家正常聊天时不会被自动拦截，也不会因发送辱骂词语立即禁言。Endstone `PlayerChatEvent` 只把未被其他插件取消的消息暂存在内存环形记录中。
 - 当举报类别选择“辱骂”时，插件按目标 UUID 检索最近 10 分钟聊天记录，默认每名玩家最多保留 50 条；只在记录中命中配置的明确辱骂词条后才允许触发禁言。匹配前会做 Unicode 兼容归一化，并忽略空格、常见标点和格式字符，以识别简单的拆字/标点绕过。
@@ -144,3 +144,17 @@ AI 默认本地运行且无需 API Key。配置中的 ai_api_enabled、ai_api_ke
 Endstone 增强层提供可选 ONNX Runtime CPU 推理适配器。默认加载插件数据目录下 `models/zp_ac_behavior.onnx`，也可用 `ai_onnx_model_path` 指定。安装依赖：`python -m pip install ".[onnx]"`。模型输入为 float32 `[N,7]`，顺序为 move_speed_mean、move_speed_peak、combat_rate、target_diversity、ore_ratio、click_cv、scaffold_rate；单输出解释为异常概率，多输出取最后一项作为异常类别分数。缺少模型/依赖/模型格式不符时，ONNX 自动停用，原统计引擎继续工作。
 
 数据采集默认开启，写入插件数据目录 `ai_dataset.jsonl`，每名玩家每 30 秒最多一条样本。记录包含 SHA-256 派生匿名 player_key、时间戳、数值特征和空标签，不保存玩家名、UUID、XUID或聊天内容；文件到达大小上限时轮转为 .1。样本必须人工审核标注：`python tools/label_ai_dataset.py <ai_dataset.jsonl> <64位player_key> normal|cheat`。当前仓库提供推理和数据采集/标注管线，**不包含已训练的生产模型**。ONNX 分数只通知管理员，不改变信用分、风险分或处罚状态。
+
+
+## 双模式客户端验证（Endstone 1.0.0）
+
+ZP-AC 采用标准 Bedrock 服务端观察模式 + 可选专用原生客户端验证模式。**行为包 Script API 在世界/服务端脚本环境运行，并不在每个远程玩家的客户端进程中运行**，因此普通客户端模式不扫描客户端内存、进程或 DLL。
+
+- 普通 Bedrock 客户端无需安装任何额外 APK，继续使用行为包与 Endstone 服务端权威检测。
+- 专用 Android 客户端可集成 Android Keystore ECDSA P-256 参考 SDK，使用管理员一次性配对码登记设备公钥。
+- 原生客户端通过一次性随机挑战、过期时间、UUID 绑定和递增序列号提交签名遥测，服务端验证签名并防止重放。
+- 客户端完整性字段仅作为签名保护的客户端自报声明，不视为独立可信证明，不单独触发扣分、踢出或封禁。
+- 原生验证 API 默认关闭；启用时建议监听 127.0.0.1:9179，并由 TLS 反向代理提供公网 HTTPS。
+- 管理命令：`/zpac client status <玩家>`、`/zpac client pair <在线玩家>`、`/zpac client revoke <玩家>`。
+
+完整协议、配置、API 和集成边界见 [双模式客户端验证架构](docs/DUAL_MODE_CLIENT_ARCHITECTURE.md)。Android 参考 SDK 位于 `native_client_sdk/android/NativeAttestationClient.kt`。SDK 需要集成进真正的专用 Bedrock 客户端并接入其游戏引擎观测钩子；单独放入启动器不会自动检测游戏外挂。
