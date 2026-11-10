@@ -56,7 +56,7 @@ class RecentChatStore:
     def _prune(self, player_uuid: str, now: float) -> deque[dict[str, Any]]:
         queue = self._messages[str(player_uuid)]
         cutoff = now - self.window_seconds
-        while queue and (queue[0]["timestamp"] < cutoff or len(queue) > self.max_messages_per_player):
+        while queue and (queue[0]["timestamp"] <= cutoff or len(queue) > self.max_messages_per_player):
             queue.popleft()
         return queue
 
