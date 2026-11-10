@@ -357,6 +357,7 @@ class ZPReportAntiCheat(Plugin):
         self.native_client_connections: dict[str, int] = {}
         self.native_client_last_seen: dict[str, float] = {}
         self.native_client_latest: dict[str, dict[str, Any]] = {}
+        self.native_client_alert_cooldowns: dict[tuple[str, str], float] = {}
         self.native_client_bridge = NativeClientBridge(
             self.native_client_registry,
             self._native_client_events,
@@ -2862,6 +2863,17 @@ class ZPReportAntiCheat(Plugin):
             )
             if not suspicious:
                 continue
+            signature = ",".join(sorted(suspicious))
+            cooldown_key = (player_uuid, signature)
+            now = time.monotonic()
+            if now - self.native_client_alert_cooldowns.get(cooldown_key, 0.0) < 300.0:
+                continue
+            self.native_client_alert_cooldowns[cooldown_key] = now
+            if len(self.native_client_alert_cooldowns) > 20000:
+                self.native_client_alert_cooldowns = {
+                    key: seen for key, seen in self.native_client_alert_cooldowns.items()
+                    if now - seen < 3600.0
+                }
             detail = "原生客户端自报完整性异常：" + ", ".join(suspicious)
             self.evidence_store.append({
                 "target_uuid": player_uuid,
