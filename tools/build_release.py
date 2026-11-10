@@ -40,6 +40,8 @@ def main() -> int:
         ADDON_DIR / "scripts" / "main.js",
         RESOURCE_DIR / "manifest.json",
         RESOURCE_DIR / "pack_icon.png",
+        RESOURCE_DIR / "ui" / "_ui_defs.json",
+        RESOURCE_DIR / "ui" / "server_form.json",
         RESOURCE_DIR / "textures" / "ui" / "zp_ac_logo.png",
         RESOURCE_DIR / "textures" / "ui" / "icon_shield.png",
         RESOURCE_DIR / "textures" / "ui" / "icon_credit.png",
@@ -102,6 +104,8 @@ def main() -> int:
             BP_PREFIX + "manifest.json",
             BP_PREFIX + "scripts/main.js",
             RP_PREFIX + "manifest.json",
+            RP_PREFIX + "ui/_ui_defs.json",
+            RP_PREFIX + "ui/server_form.json",
             RP_PREFIX + "pack_icon.png",
             RP_PREFIX + "textures/ui/zp_ac_logo.png",
             RP_PREFIX + "textures/ui/icon_shield.png",
@@ -116,6 +120,12 @@ def main() -> int:
             raise SystemExit("Pack files must be nested in behavior_pack/ and resource_pack/ folders.")
         packed_bp = json.loads(archive.read(BP_PREFIX + "manifest.json"))
         packed_rp = json.loads(archive.read(RP_PREFIX + "manifest.json"))
+        ui_defs = json.loads(archive.read(RP_PREFIX + "ui/_ui_defs.json"))
+        server_form = json.loads(archive.read(RP_PREFIX + "ui/server_form.json"))
+        if "ui/server_form.json" not in ui_defs.get("ui_defs", []):
+            raise SystemExit("Custom server_form JSON UI is not registered in _ui_defs.json.")
+        if server_form.get("namespace") != "server_form":
+            raise SystemExit("Custom server_form JSON UI namespace is invalid.")
         if not any(dep.get("uuid") == packed_rp["header"]["uuid"] for dep in packed_bp.get("dependencies", [])):
             raise SystemExit("Packed behavior/resource pack UUID dependency mismatch.")
 
