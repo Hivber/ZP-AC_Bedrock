@@ -54,4 +54,37 @@ The server stores only SHA-256 token hashes and player UUIDs. Pairing codes and 
 
 ## Android SDK
 
-`android/ZpAcClientBridge.kt` is a transport reference. Integrate it into the actual Android client project, execute calls on a background executor, supply the server certificate SHA-256 fingerprint, and persist the returned token securely. The host app must call `sendTelemetry` with truthful, bounded measurements it can access.
+The reference sources are:
+
+- `android/ZpAcClientBridge.kt`: TLS pinning, one-time pairing, challenge-response and signed telemetry transport.
+- `android/ZpAcAndroidChecks.kt`: best-effort APK package/signing-certificate, debugger, root and emulator checks plus basic app runtime measurements.
+- `android/ZpAcTokenVault.kt`: AES-GCM token storage backed by Android Keystore.
+
+Example integration (run all network calls on a background executor):
+
+```kotlin
+val token = bridge.pair(pairCode, Build.FINGERPRINT)
+ZpAcTokenVault.save(context, token)
+
+// On later launches:
+val savedToken = ZpAcTokenVault.load(context) ?: return
+bridge.connect(savedToken, Build.FINGERPRINT)
+
+val appStartedAt = SystemClock.elapsedRealtime()
+val snapshot = ZpAcAndroidChecks.collect(
+    context,
+    expectedPackageName = BuildConfig.APPLICATION_ID,
+    expectedSignerSha256 = EXPECTED_RELEASE_SIGNER_SHA256,
+    appStartedAtElapsedRealtime = appStartedAt,
+)
+bridge.sendTelemetry(
+    clientVersion = BuildConfig.VERSION_NAME,
+    buildId = BuildConfig.VERSION_CODE.toString(),
+    integrity = snapshot.integrity,
+    runtime = snapshot.runtime,
+)
+```
+
+Call `sendTelemetry` periodically (the transport accepts at most one report per second; a 10-second interval is recommended), and close/reconnect when the app returns from background or the network changes. The host app must obtain the expected signer fingerprint from its release APK signing certificate and pin the server certificate fingerprint out-of-band.
+
+These Android checks are heuristics: root/debugger/emulator signals can be false positives or hidden, and a modified client can falsify all local results. This SDK does not inspect Minecraft memory, native game code, other processes, or gameplay input. Actual gameplay anti-cheat remains server-authoritative.
