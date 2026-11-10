@@ -31,6 +31,8 @@ const CONFIG = Object.freeze({
   PLUGIN_EVIDENCE_EVENT: "zp:ac_bp_evidence",
   ADMIN_REQUEST_EVENT: "zp:ac_admin_request",
   ADMIN_RESPONSE_EVENT: "zp:ac_admin_response",
+  CREDIT_REQUEST_EVENT: "zp:credit_request",
+  CREDIT_RESPONSE_EVENT: "zp:credit_response",
   ADMIN_PROTOCOL: "zp-ac-admin-v1",
   CHECKS_SYNC_EVENT: "zp:ac_checks_sync",
   CHECKS_PROTOCOL: "zp-ac-checks-v1",
@@ -678,6 +680,10 @@ function parseReportMessage(raw) {
 }
 
 function handleScriptEvent(event) {
+  if (event.id === CONFIG.CREDIT_RESPONSE_EVENT) {
+    handlePublicCreditResponse(event);
+    return;
+  }
   if (event.id === CONFIG.ADMIN_RESPONSE_EVENT) {
     handleAdminResponse(event);
     return;
@@ -810,6 +816,64 @@ const REPORT_UI_CONFIG = {
 };
 
 let reportSequence = 0;
+let creditRequestSequence = 0;
+const pendingCreditRequests = new Map();
+
+function requestPublicCredit(player) {
+    if (!isPluginOnline()) {
+        sendMessage(player, "§e信用分查询需要 ZP-AC Endstone 增强插件在线。请稍后重试。");
+        return;
+    }
+    creditRequestSequence += 1;
+    const requestId = `credit-${Date.now()}-${creditRequestSequence}`;
+    pendingCreditRequests.set(requestId, player.id);
+    const payload = { version: "zp-credit-v1", requestId, playerName: player.name };
+    try {
+        const encoded = encodeBase64Utf8(JSON.stringify(payload));
+        world.getDimension("overworld").runCommand(`scriptevent ${CONFIG.CREDIT_REQUEST_EVENT} b64:${encoded}`);
+        system.runTimeout(() => {
+            if (pendingCreditRequests.delete(requestId)) {
+                const onlinePlayer = world.getPlayers().find((item) => item.id === player.id);
+                if (onlinePlayer) sendMessage(onlinePlayer, "§c信用分查询超时：增强插件没有返回结果，请联系管理员检查服务器日志。");
+            }
+        }, 100);
+    } catch (error) {
+        pendingCreditRequests.delete(requestId);
+        sendMessage(player, "§c无法发送信用分查询请求，请稍后重试。");
+        console.warn("[ZP-AC] 信用分查询请求发送失败: " + error);
+    }
+}
+
+function handlePublicCreditResponse(event) {
+    if (event.sourceType !== ScriptEventSource.Server) return;
+    let payload;
+    try { payload = parseReportMessage(event.message); }
+    catch (error) { console.warn("[ZP-AC] 信用分响应解析失败: " + error); return; }
+    if (!payload || payload.version !== "zp-credit-v1") return;
+    const requestId = cleanText(payload.requestId, 100);
+    const playerId = pendingCreditRequests.get(requestId);
+    if (!playerId) return;
+    pendingCreditRequests.delete(requestId);
+    const player = world.getPlayers().find((item) => item.id === playerId);
+    if (!player) return;
+    if (!payload.ok || typeof payload.score !== "number" || !Number.isFinite(payload.score)) {
+        sendMessage(player, "§c信用分查询失败：" + cleanText(payload.error || "插件未能读取公开信用分", 120));
+        return;
+    }
+    const score = Math.max(0, Math.min(100, payload.score));
+    const threshold = Number.isFinite(payload.lockThreshold) ? payload.lockThreshold : 70;
+    const locked = score < threshold;
+    const recovery = Number.isFinite(payload.recoveryPerHour) ? payload.recoveryPerHour : 0.5;
+    const level = score >= 90 ? "§a优秀" : score >= 80 ? "§b良好" : score >= threshold ? "§e正常" : "§c受限";
+    const form = new ActionFormData()
+        .title("§l§b我的 ZP 信用分")
+        .body(`§f当前公开信用分：§e${score.toFixed(1)}§7/100\n\n§f信用等级：${level}\n§f主动 PvP：${locked ? "§c已限制（低于 " + threshold.toFixed(0) + " 分）" : "§a正常"}\n\n§7信用分会根据已确认的违规行为扣减。\n§7在线活跃恢复速度：每小时 +${recovery.toFixed(1)} 分。\n§8本界面仅显示公开信用分，不包含隐藏可信画像或风险数据。`)
+        .button("§l§a关闭");
+    form.show(player).catch((error) => {
+        console.warn("[ZP-AC] 信用分界面打开失败: " + error);
+        sendMessage(player, "§c信用分界面无法打开，请重新点击查询。");
+    });
+}
 
 function sendMessage(player, message) {
     try { player.sendMessage(message); }
@@ -878,12 +942,7 @@ function openBaMenu(player) {
         if (response.canceled) return;
         if (response.selection === 0) {
             // Run as the invoking player so Endstone resolves the player's own UUID.
-            try {
-                player.runCommand("zp");
-            } catch (error) {
-                sendMessage(player, "§c暂时无法读取信用分，请稍后重试。");
-                console.warn("[ZP-AC] 查询公开信用分失败: " + error);
-            }
+            requestPublicCredit(player);
         } else if (response.selection === 1) {
             openReportMenu(player);
         }
