@@ -2954,6 +2954,11 @@ class ZPReportAntiCheat(Plugin):
         if now - self.native_client_alert_cooldowns.get(cooldown_key, 0.0) < 300.0:
             return
         self.native_client_alert_cooldowns[cooldown_key] = now
+        if len(self.native_client_alert_cooldowns) > 20000:
+            self.native_client_alert_cooldowns = {
+                key: seen for key, seen in self.native_client_alert_cooldowns.items()
+                if now - seen < 3600.0
+            }
         self.evidence_store.append({
             "target_uuid": player_uuid,
             "rule": "native_client_position_delta_advisory",
@@ -3229,4 +3234,6 @@ class ZPReportAntiCheat(Plugin):
             self.sessions[key]["offline_since"] = time.monotonic()
         if key:
             self.native_client_bridge.disconnect_player(key)
+            self.native_client_connections.pop(key, None)
+            self.native_client_last_seen.pop(key, None)
 
