@@ -47,6 +47,7 @@ from .evidence_store import EvidenceStore
 from .runtime_metrics import RuntimeMetrics
 from .mining_analysis import classify_mined_block, summarize_mining_events
 from .mute import DEFAULT_MUTE_DURATIONS_SECONDS, MuteStore
+from .chat_moderation import DEFAULT_INSULT_TERMS, RecentChatStore
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -176,7 +177,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.8.0"
+    version = "0.9.0"
     commands = {
         "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
@@ -253,6 +254,9 @@ class ZPReportAntiCheat(Plugin):
             "evidence_max_records": 10000,
             "security_max_bridge_payload_bytes": 8192,
             "insult_mute_durations_seconds": list(DEFAULT_MUTE_DURATIONS_SECONDS),
+            "insult_chat_window_seconds": 600,
+            "insult_chat_max_messages_per_player": 50,
+            "insult_detection_terms": list(DEFAULT_INSULT_TERMS),
         }
         changed = False
         for key, value in defaults.items():
@@ -291,6 +295,16 @@ class ZPReportAntiCheat(Plugin):
         if not isinstance(mute_durations, (list, tuple)) or not mute_durations:
             mute_durations = DEFAULT_MUTE_DURATIONS_SECONDS
         self.mute_store = MuteStore(self.data_path / "muted_players.json", mute_durations)
+        self.recent_chat_store = RecentChatStore(
+            window_seconds=float(self.cfg.get("insult_chat_window_seconds", 600)),
+            max_messages_per_player=int(self.cfg.get("insult_chat_max_messages_per_player", 50)),
+        )
+        raw_insult_terms = self.cfg.get("insult_detection_terms", list(DEFAULT_INSULT_TERMS))
+        if not isinstance(raw_insult_terms, (list, tuple)):
+            raw_insult_terms = list(DEFAULT_INSULT_TERMS)
+        self.insult_detection_terms = tuple(
+            _clean(term, 40) for term in raw_insult_terms if _clean(term, 40)
+        ) or DEFAULT_INSULT_TERMS
         self._mute_notice_last: dict[str, float] = {}
         self.evidence_store = EvidenceStore(
             self.data_path / "evidence_records.jsonl",
@@ -1774,13 +1788,29 @@ class ZPReportAntiCheat(Plugin):
         cooldown_key = (target_key or target_name.casefold(), reporter_key)
         cooldown = float(self.cfg.get("reporter_target_cooldown_seconds", 600))
         mute_report_allowed = True
+        insult_matches: list[dict[str, Any]] = []
         if category == "辱骂":
-            mute_report_allowed = self.mute_store.try_record_report(
-                target_key or target_name.casefold(),
-                reporter_key,
-                cooldown,
-                now=time.time(),
-            )
+            if target_key:
+                insult_matches = self.recent_chat_store.find_insults(
+                    target_key, self.insult_detection_terms
+                )
+            if insult_matches:
+                mute_report_allowed = self.mute_store.try_record_report(
+                    target_key or target_name.casefold(),
+                    reporter_key,
+                    cooldown,
+                    now=time.time(),
+                )
+            else:
+                self._log(
+                    "insult_report_not_confirmed",
+                    target_uuid=target_key,
+                    reporter_uuid=reporter_key,
+                    report_id=report_id,
+                    chat_window_seconds=float(self.cfg.get("insult_chat_window_seconds", 600)),
+                    inspected_messages=len(self.recent_chat_store.recent(target_key or "")),
+                    action="no_mute_no_violation_increment",
+                )
         session = self.sessions.get(target_key or "")
         if session is not None:
             # 同一举报者冷却期内重复提交，只更新理由/记录，不增加独立举报人数。
@@ -1805,11 +1835,28 @@ class ZPReportAntiCheat(Plugin):
 
         self.report_cooldowns[cooldown_key] = now
         if category == "辱骂":
-            if mute_report_allowed:
-                self._apply_insult_report_mute(reporter, target, reason, report_id)
+            if not insult_matches:
+                try:
+                    reporter.send_message(
+                        "§e举报已收到，但目标玩家最近聊天记录中未检测到辱骂内容，本次不会禁言或增加违规次数。"
+                    )
+                except Exception:
+                    pass
+                self._admin_alert(
+                    f"辱骂举报未通过聊天证据检测：§e{target_name}§r；未执行禁言。"
+                )
+            elif mute_report_allowed:
+                matched_terms = sorted({
+                    term for item in insult_matches for term in item.get("matched_terms", [])
+                })
+                self._apply_insult_report_mute(
+                    reporter, target, reason, report_id,
+                    matched_terms=matched_terms,
+                    evidence_count=len(insult_matches),
+                )
             else:
                 try:
-                    reporter.send_message("§e该目标的辱骂举报仍在 10 分钟冷却期内，本次已记录但不会重复增加禁言等级。")
+                    reporter.send_message("§e已检测到辱骂证据，但该目标仍在本举报者的 10 分钟冷却期内，本次不会重复增加禁言等级。")
                 except Exception:
                     pass
                 self._log(
@@ -1817,7 +1864,7 @@ class ZPReportAntiCheat(Plugin):
                     target_uuid=target_key,
                     reporter_uuid=reporter_key,
                     report_id=report_id,
-                    action="no_repeat_escalation_within_report_cooldown",
+                    action="confirmed_evidence_but_cooldown_prevented_repeat_escalation",
                 )
         tier = self._tier(len(session["reporters"]))
         self._admin_alert(
@@ -1839,7 +1886,13 @@ class ZPReportAntiCheat(Plugin):
         )
 
     def _apply_insult_report_mute(
-        self, reporter: Any, target: Any, reason: str, report_id: str
+        self,
+        reporter: Any,
+        target: Any,
+        reason: str,
+        report_id: str,
+        matched_terms: list[str] | None = None,
+        evidence_count: int = 0,
     ) -> None:
         target_uuid = _player_key(target)
         if not target_uuid:
@@ -1855,7 +1908,7 @@ class ZPReportAntiCheat(Plugin):
             duration_label = f"{duration // 60} 分钟"
         try:
             target.send_message(
-                f"§c你因收到辱骂行为举报，已被系统禁言 {duration_label}。"
+                f"§c系统在你的近期聊天记录中检测到辱骂内容，已禁言 {duration_label}。"
                 f"§7累计次数：{count}；剩余约 {remaining_minutes} 分钟。"
                 "如有异议，请联系管理员复核。"
             )
@@ -1863,13 +1916,13 @@ class ZPReportAntiCheat(Plugin):
             pass
         try:
             reporter.send_message(
-                f"§a辱骂举报已提交，目标玩家已立即禁言 {duration_label}。"
+                f"§a辱骂举报已通过聊天记录检测，目标玩家已禁言 {duration_label}。"
                 f"§7该玩家累计辱骂举报次数：{count}。"
             )
         except Exception:
             pass
         self._admin_alert(
-            f"§c辱骂举报触发即时禁言§r：§e{_player_name(target)}§r；"
+            f"§c聊天证据确认辱骂并触发禁言§r：§e{_player_name(target)}§r；"
             f"举报者：{_player_name(reporter)}；累计次数 {count}；本次时长 {duration_label}。"
         )
         self._log(
@@ -1881,16 +1934,19 @@ class ZPReportAntiCheat(Plugin):
             muted_until=until,
             reason=_clean(reason, 200),
             report_id=_clean(report_id, 80),
-            action="mute_chat_only",
+            matched_terms=list(matched_terms or []),
+            matched_message_count=max(0, int(evidence_count)),
+            action="mute_chat_only_after_recent_chat_match",
         )
 
     @event_handler
     def on_player_chat(self, event: PlayerChatEvent) -> None:
         player = event.player
         player_uuid = _player_key(player)
-        if not player_uuid or not self.mute_store.is_muted(player_uuid):
+        if not player_uuid:
             return
-        event.is_cancelled = True
+        if self.mute_store.is_muted(player_uuid):
+            event.is_cancelled = True
         now_mono = time.monotonic()
         if now_mono - self._mute_notice_last.get(player_uuid, 0.0) < 3.0:
             return
@@ -1903,6 +1959,9 @@ class ZPReportAntiCheat(Plugin):
             )
         except Exception:
             pass
+            return
+        if not bool(getattr(event, "is_cancelled", False)):
+            self.recent_chat_store.record(player_uuid, getattr(event, "message", ""))
 
     # ----------------------------- movement checks -----------------------------
 
