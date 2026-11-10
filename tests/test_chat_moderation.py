@@ -24,6 +24,8 @@ class ChatModerationTests(unittest.TestCase):
 
     def test_does_not_match_unrelated_chat(self):
         self.assertEqual(detect_insult_terms("大家晚上好，今天一起玩吧"), ())
+        self.assertEqual(detect_insult_terms("这个垃圾桶放在哪里"), ())
+        self.assertEqual(detect_insult_terms("subscribe to the channel"), ())
 
     def test_history_is_separated_by_player(self):
         store = RecentChatStore(window_seconds=600, max_messages_per_player=5)
