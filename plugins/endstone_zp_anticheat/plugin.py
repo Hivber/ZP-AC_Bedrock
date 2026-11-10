@@ -1113,7 +1113,7 @@ class ZPReportAntiCheat(Plugin):
         if action == "mining":
             sender.send_message(
                 f"§8[§bZP-AC 矿物防护§8] §f定向采矿分析：{'启用' if self._check_enabled('xray') else '关闭'}；"
-                f"记录证据 {sum(1 for row in self.evidence_store._read_jsonl(self.evidence_store.path) if row.get('code') == 'xray_mining_pattern')} 条。"
+                f"记录证据 {self.evidence_store.count_by_code('xray_mining_pattern')} 条。"
             )
             sender.send_message("§e当前运行的是服务端挖矿行为分析，不是客户端区块混淆。Endstone 当前事件桥接未实现逐玩家伪矿石/区块数据下发，因此不会伪称已启用矿物遮蔽。")
             return True
@@ -1436,6 +1436,8 @@ class ZPReportAntiCheat(Plugin):
                     "cloud_enabled": bool(self.cfg.get("cloud_enabled", False)),
                     "cloud_config_ready": cloud_ready,
                     "cloud_problem": cloud_problem,
+                    "evidence_count": self.evidence_store.count(),
+                    "runtime_metrics": self.metrics.snapshot(),
                 }
             elif action == "candidate_list":
                 candidates = sorted(
@@ -1596,6 +1598,12 @@ class ZPReportAntiCheat(Plugin):
     def _on_behavior_pack_evidence(self, event: ScriptMessageEvent) -> None:
         if not bool(self.cfg.get("behavior_pack_bridge_enabled", True)):
             return
+        sender = getattr(event, "sender", None)
+        sender_name = _clean(getattr(sender, "name", ""), 32).lower()
+        if not isinstance(sender, ConsoleCommandSender) and sender_name not in {"server", "console"}:
+            self.metrics.increment("rejected_behavior_evidence_sender")
+            self.logger.warning("忽略非服务端来源的行为包检测证据。")
+            return
         try:
             payload = json.loads(unquote(event.message or ""))
         except Exception as exc:
@@ -1652,6 +1660,11 @@ class ZPReportAntiCheat(Plugin):
     @event_handler
     def on_script_message(self, event: ScriptMessageEvent) -> None:
         self.metrics.increment("script_events")
+        raw_payload = event.message or ""
+        if len(raw_payload.encode("utf-8", errors="ignore")) > int(self.cfg.get("security_max_bridge_payload_bytes", 8192)):
+            self.metrics.increment("rejected_script_event_oversize")
+            self.logger.warning("忽略超出大小限制的 ZP-AC ScriptEvent。")
+            return
         message_id = getattr(event, "message_id", "")
         if message_id == BP_CREDIT_REQUEST_ID:
             self._on_behavior_pack_credit_request(event)
