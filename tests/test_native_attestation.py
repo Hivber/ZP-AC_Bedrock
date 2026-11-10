@@ -77,8 +77,13 @@ class NativeAttestationTests(unittest.TestCase):
             "capabilities": ["input-telemetry", "keystore-key"],
             "integrity": {"package_signature_valid": True, "debugger_detected": False},
         }
-        payload["signature"] = self._sign(MOD.canonical_json(payload))
-        return payload
+        signed_bytes = __import__("json").dumps(
+            payload, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+        return {
+            "signed_payload": base64.b64encode(signed_bytes).decode("ascii"),
+            "signature": self._sign(signed_bytes),
+        }
 
     def test_pairing_requires_online_player_and_one_time_code(self):
         code = self.service.create_pairing_code(self.player_uuid)
@@ -138,8 +143,10 @@ class NativeAttestationTests(unittest.TestCase):
     def test_bad_signature_is_rejected(self):
         self._enroll()
         payload = self._attestation_payload()
-        payload["build_id"] = "tampered-after-signing"
-        with self.assertRaises(Exception):
+        raw = base64.b64decode(payload["signed_payload"])
+        tampered = raw.replace(b"test-build", b"fake-build")
+        payload["signed_payload"] = base64.b64encode(tampered).decode("ascii")
+        with self.assertRaises(ValueError):
             self.service.verify_attestation(payload)
 
     def test_revocation_removes_registered_key(self):
