@@ -810,7 +810,7 @@ console.warn("[ZP-AC] Bedrock 独立基础反作弊已启动：全员移动/战�
 
 const REPORT_UI_CONFIG = {
     command: "zp_ac:ba",
-    title: "§l§6ZP 玩家举报系统",
+    title: "§l§6玩家举报系统",
     successMessage: "§a举报已提交；独立基础反作弊持续运行，若安装增强插件则同步证据。",
     maxReasonLength: 200
 };
@@ -866,7 +866,7 @@ function handlePublicCreditResponse(event) {
     const recovery = Number.isFinite(payload.recoveryPerHour) ? payload.recoveryPerHour : 0.5;
     const level = score >= 90 ? "§a优秀" : score >= 80 ? "§b良好" : score >= threshold ? "§e正常" : "§c受限";
     const form = new ActionFormData()
-        .title("§l§bZP 我的信用分")
+        .title("§l§b我的 ZP 信用分")
         .body(`§f当前公开信用分：§e${score.toFixed(1)}§7/100\n\n§f信用等级：${level}\n§f主动 PvP：${locked ? "§c已限制（低于 " + threshold.toFixed(0) + " 分）" : "§a正常"}\n\n§7信用分会根据已确认的违规行为扣减。\n§7在线活跃恢复速度：每小时 +${recovery.toFixed(1)} 分。\n§8本界面仅显示公开信用分，不包含隐藏可信画像或风险数据。`)
         .button("§l§a关闭");
     form.show(player).catch((error) => {
@@ -935,8 +935,8 @@ function openBaMenu(player) {
     const form = new ActionFormData()
         .title("§l§bZP 综合菜单")
         .body("§7玩家服务中心\n\n§f请选择需要使用的功能。")
-        .button("§l§e查看我的信用分", "textures/ui/icon_credit.png")
-        .button("§l§c举报其他玩家", "textures/ui/icon_report.png");
+        .button("§l§e查看我的信用分")
+        .button("§l§c举报其他玩家");
 
     form.show(player).then(response => {
         if (response.canceled) return;
