@@ -131,9 +131,19 @@ class ZpAcClientBridge(
             .joinToString("") { "%02x".format(it) }
     }
 
-    private fun canonical(value: JSONObject): String {
-        val keys = value.keys().asSequence().toList().sorted()
-        return JSONObject().also { sorted -> keys.forEach { sorted.put(it, value.get(it)) } }.toString()
+    private fun canonical(value: JSONObject): String = canonicalValue(value).toString()
+
+    private fun canonicalValue(value: Any?): Any? = when (value) {
+        is JSONObject -> {
+            val keys = value.keys().asSequence().toList().sorted()
+            JSONObject().also { sorted ->
+                keys.forEach { key -> sorted.put(key, canonicalValue(value.get(key))) }
+            }
+        }
+        is org.json.JSONArray -> org.json.JSONArray().also { sorted ->
+            for (index in 0 until value.length()) sorted.put(canonicalValue(value.get(index)))
+        }
+        else -> value
     }
 
     override fun close() {
