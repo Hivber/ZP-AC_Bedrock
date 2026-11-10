@@ -912,7 +912,7 @@ function encodeBase64Utf8(value) {
     return output;
 }
 
-function submitReportToEndstone(reporter, target, reason, reportId) {
+function submitReportToEndstone(reporter, target, category, reason, reportId) {
     const payload = {
         version: "zp-report-v1",
         reportId,
@@ -920,6 +920,7 @@ function submitReportToEndstone(reporter, target, reason, reportId) {
         reporterId: reporter.id,
         targetName: target.name,
         targetId: target.id,
+        category,
         reason
     };
     const encoded = encodeBase64Utf8(JSON.stringify(payload));
@@ -961,38 +962,49 @@ function openReportMenu(player) {
 
     const targetIds = targets.map(target => target.id);
     const targetNames = targets.map(target => target.name);
+    const reportCategories = [
+        "恶意破坏",
+        "攻击玩家",
+        "辱骂",
+        "外挂",
+        "透视",
+        "其他"
+    ];
     const form = new ModalFormData()
         .title(REPORT_UI_CONFIG.title)
-        .dropdown("§l§f选择举报对象", targetNames)
-        .textField("§l§f举报理由", "请输入举报理由...", { defaultValue: "" })
+        .dropdown("§l§f第 1 项：选择举报玩家", targetNames)
+        .dropdown("§l§f第 2 项：选择举报类型", reportCategories)
+        .textField("§l§f第 3 项：填写举报原因（可留空）", "可补充发生时间、地点或具体情况...", { defaultValue: "" })
         .submitButton("§l§a提交举报");
 
     form.show(player).then(response => {
         if (response.canceled) return;
         const values = response.formValues;
-        if (!values || values.length < 2) {
+        if (!values || values.length < 3) {
             sendMessage(player, "§c提交失败，请重新打开举报菜单。");
             return;
         }
 
         const selectedIndex = values[0];
-        const rawReason = values[1];
+        const categoryIndex = values[1];
+        const rawReason = values[2];
         if (typeof selectedIndex !== "number" || !Number.isInteger(selectedIndex) ||
             selectedIndex < 0 || selectedIndex >= targetIds.length) {
             sendMessage(player, "§c请选择有效的举报对象。");
             return;
         }
+        if (typeof categoryIndex !== "number" || !Number.isInteger(categoryIndex) ||
+            categoryIndex < 0 || categoryIndex >= reportCategories.length) {
+            sendMessage(player, "§c请选择有效的举报类型。");
+            return;
+        }
         if (typeof rawReason !== "string") {
-            sendMessage(player, "§c举报理由无效。");
+            sendMessage(player, "§c举报原因格式无效。");
             return;
         }
         const reason = rawReason.trim();
-        if (!reason) {
-            sendMessage(player, "§c举报理由不能为空。");
-            return;
-        }
         if (reason.length > REPORT_UI_CONFIG.maxReasonLength) {
-            sendMessage(player, "§c举报理由最多200个字符。");
+            sendMessage(player, "§c举报原因最多 200 个字符。");
             return;
         }
 
@@ -1003,10 +1015,11 @@ function openReportMenu(player) {
             return;
         }
 
+        const category = reportCategories[categoryIndex];
         reportSequence += 1;
         const reportId = `${Date.now()}-${reportSequence}`;
         try {
-            submitReportToEndstone(player, target, reason, reportId);
+            submitReportToEndstone(player, target, category, reason, reportId);
             sendMessage(player, REPORT_UI_CONFIG.successMessage);
         } catch (error) {
             console.warn(`[PlayerReport] 向 Endstone 发送举报失败: ${error}`);
@@ -1017,7 +1030,6 @@ function openReportMenu(player) {
         sendMessage(player, "§c举报菜单发生错误，请稍后重试。");
     });
 }
-
 
 /* ===== ZP-AC administrator panel: native Bedrock server forms ===== */
 const ADMIN_UI_COMMAND = "zp_ac:admin";
