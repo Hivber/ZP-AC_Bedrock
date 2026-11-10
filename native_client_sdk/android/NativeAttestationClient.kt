@@ -86,26 +86,6 @@ class NativeAttestationClient(
         return Base64.encodeToString(signer.sign(), Base64.NO_WRAP)
     }
 
-    private fun quote(value: String): String = JSONObject.quote(value)
-
-    private fun canonicalValue(value: Any?): String = when (value) {
-        null, JSONObject.NULL -> "null"
-        is String -> quote(value)
-        is Boolean, is Number -> value.toString()
-        is JSONObject -> canonicalJson(value)
-        is JSONArray -> (0 until value.length()).joinToString(",", "[", "]") {
-            canonicalValue(value.get(it))
-        }
-        else -> quote(value.toString())
-    }
-
-    private fun canonicalJson(value: JSONObject): String {
-        val keys = value.keys().asSequence().toList().sorted()
-        return keys.joinToString(",", "{", "}") { key ->
-            quote(key) + ":" + canonicalValue(value.get(key))
-        }
-    }
-
     private fun post(path: String, payload: JSONObject): JSONObject {
         val connection = URL(normalizedBaseUrl + path).openConnection() as HttpURLConnection
         try {
@@ -179,8 +159,11 @@ class NativeAttestationClient(
                 integrityClaims.entries.take(24).forEach { (key, value) -> obj.put(key, value) }
             })
             .put("telemetry", telemetry)
-        payload.put("signature", sign(pair, canonicalJson(payload).toByteArray(Charsets.UTF_8)))
-        return post("/v1/attest", payload)
+        val signedBytes = payload.toString().toByteArray(Charsets.UTF_8)
+        val envelope = JSONObject()
+            .put("signed_payload", Base64.encodeToString(signedBytes, Base64.NO_WRAP))
+            .put("signature", sign(pair, signedBytes))
+        return post("/v1/attest", envelope)
     }
 
     /** Indicates whether Android reports this Keystore key as hardware-backed. */
