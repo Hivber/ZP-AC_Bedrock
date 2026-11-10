@@ -61,8 +61,8 @@ jobs:
           assert manifest["header"]["version"] == [2, 1, 9]
           assert manifest["modules"][0]["version"] == [2, 1, 9]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.9.0"
-          assert 'version = "0.9.0"' in plugin
+          assert project["project"]["version"] == "1.0.0"
+          assert 'version = "1.0.0"' in plugin
           assert resource_manifest["header"]["version"] == [1, 0, 0]
           assert resource_manifest["header"]["min_engine_version"] == [1, 26, 60]
           assert resource_manifest["modules"][0]["type"] == "resources"
@@ -92,6 +92,27 @@ jobs:
           assert "event.is_cancelled = True" in plugin
           assert "MuteStore" in plugin
           assert "RecentChatStore" in plugin
+          assert "NativeClientRegistry" in plugin
+          assert "NativeClientBridge" in plugin
+          assert "clientpair" in plugin
+          assert "clientstatus" in plugin
+          assert "native_client_bridge_enabled" in config
+          assert "native_client_tls_cert" in config
+          assert "NativeClientRegistry" in Path("plugins/endstone_zp_anticheat/client_security.py").read_text(encoding="utf-8")
+          assert "allow_pair_attempt" in Path("plugins/endstone_zp_anticheat/client_bridge.py").read_text(encoding="utf-8")
+          assert "test_telemetry_schema_is_bounded" in Path("tests/test_client_security.py").read_text(encoding="utf-8")
+          assert "client_pos_x" in Path("plugins/endstone_zp_anticheat/client_security.py").read_text(encoding="utf-8")
+          assert "_correlate_native_client_position" in plugin
+          assert "gameTelemetry" in Path("native_client/android/ZpAcClientBridge.kt").read_text(encoding="utf-8")
+          assert "test_pair_attempts_are_rate_limited_per_source_ip" in Path("tests/test_client_security.py").read_text(encoding="utf-8")
+          assert "test_native_bridge_refuses_plaintext_without_tls_files" in Path("tests/test_client_security.py").read_text(encoding="utf-8")
+          assert "clientrevoke" in plugin
+          assert "review_only_no_punishment" in plugin
+          assert "TLS-only native client transport" in Path("plugins/endstone_zp_anticheat/client_bridge.py").read_text(encoding="utf-8")
+          assert "test_pair_code_is_single_use_and_token_is_not_persisted" in Path("tests/test_client_security.py").read_text(encoding="utf-8")
+          assert "ZpAcClientBridge" in Path("native_client/android/ZpAcClientBridge.kt").read_text(encoding="utf-8")
+          assert "ZpAcAndroidChecks" in Path("native_client/android/ZpAcAndroidChecks.kt").read_text(encoding="utf-8")
+          assert "AndroidKeyStore" in Path("native_client/android/ZpAcTokenVault.kt").read_text(encoding="utf-8")
           assert "insult_report_not_confirmed" in plugin
           assert "test_history_expires_after_window" in Path("tests/test_chat_moderation.py").read_text(encoding="utf-8")
           assert "chat_moderation.py" in Path("tools/build_release.py").read_text(encoding="utf-8")
@@ -187,7 +208,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v5
         with:
-          name: ZP-AC-2.1.9-and-Endstone-0.9.0
+          name: ZP-AC-2.1.9-and-Endstone-1.0.0
           path: |
             dist/*.mcaddon
             dist/*.whl
