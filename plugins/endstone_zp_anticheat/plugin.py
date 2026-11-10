@@ -1045,7 +1045,7 @@ class ZPReportAntiCheat(Plugin):
                 f"§f原生客户端桥接：§{'a' if status['enabled'] else 'e'}{'已监听' if status['enabled'] else '未启用'}\n"
                 f"§f监听地址：§7{status['host']}:{status['port']}\n"
                 f"§f已配对设备：§e{self.native_client_registry.paired_count()}\n"
-                f"§f当前连接设备：§e{len(self.native_client_connections)}\n"
+                f"§f当前连接设备：§e{sum(self.native_client_connections.values())}\n"
                 + (f"§c状态：{status['error']}" if status["error"] else "")
             )
             return True
