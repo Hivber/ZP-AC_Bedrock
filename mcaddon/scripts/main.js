@@ -15,12 +15,11 @@ import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/serve
  * Behavior Pack 2.1.7 | @minecraft/server 2.10.0
  *
  * Design:
- * - Standalone mode: this behavior pack continuously monitors online players,
- *   records evidence in world dynamic properties and alerts tagged admins.
- * - Endstone enhanced mode: an authenticated-in-process heartbeat is exchanged
- *   through server ScriptEvents. Evidence is forwarded to Endstone for durable
- *   audit, correlation scoring, optional kick, review candidates and UUID bans.
- * - No network calls, no client-memory inspection, no automatic permanent bans.
+ * - Script API runs in the world/server script environment, not inside each remote player's client process.
+ * - Standard mode observes server-visible player behavior and records evidence locally.
+ * - Endstone mode exchanges a server-side ScriptEvent lease and forwards evidence for durable audit.
+ * - Optional native-client attestation is implemented by the Endstone HTTPS API, not by this behavior pack.
+ * - No client-memory/process/DLL inspection is claimed; permanent bans still require administrator confirmation.
  */
 
 const CONFIG = Object.freeze({
