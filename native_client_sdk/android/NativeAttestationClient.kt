@@ -14,7 +14,7 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
-import java.util.Base64
+import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -75,7 +75,7 @@ class NativeAttestationClient(
             .joinToString("") { "%02x".format(it) }
 
     private fun publicKeyPem(pair: KeyPair): String {
-        val encoded = Base64.getMimeEncoder(64, byteArrayOf(10)).encodeToString(pair.public.encoded)
+        val encoded = Base64.encodeToString(pair.public.encoded, Base64.NO_WRAP)
         return "-----BEGIN PUBLIC KEY-----\n$encoded\n-----END PUBLIC KEY-----"
     }
 
@@ -83,7 +83,7 @@ class NativeAttestationClient(
         val signer = Signature.getInstance("SHA256withECDSA")
         signer.initSign(pair.private)
         signer.update(message)
-        return Base64.getEncoder().encodeToString(signer.sign())
+        return Base64.encodeToString(signer.sign(), Base64.NO_WRAP)
     }
 
     private fun quote(value: String): String = JSONObject.quote(value)
