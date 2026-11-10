@@ -277,6 +277,7 @@ class ZPReportAntiCheat(Plugin):
         )
         self._ai_last_analysis: dict[str, float] = {}
         self.report_cooldowns: dict[tuple[str, str], float] = {}
+        self.insult_report_cooldowns: dict[tuple[str, str], float] = {}
         self.packet_second: dict[str, dict[str, Any]] = {}
         self.break_events: dict[str, deque[float]] = defaultdict(deque)
         self.click_events: dict[str, deque[float]] = defaultdict(deque)
@@ -1773,8 +1774,11 @@ class ZPReportAntiCheat(Plugin):
         reporter_key = _player_key(reporter) or reporter_name.casefold()
         cooldown_key = (target_key or target_name.casefold(), reporter_key)
         cooldown = float(self.cfg.get("reporter_target_cooldown_seconds", 600))
-        previous_report_at = self.report_cooldowns.get(cooldown_key)
-        mute_report_allowed = previous_report_at is None or now - previous_report_at >= cooldown
+        previous_insult_report_at = self.insult_report_cooldowns.get(cooldown_key)
+        mute_report_allowed = (
+            previous_insult_report_at is None
+            or now - previous_insult_report_at >= cooldown
+        )
         session = self.sessions.get(target_key or "")
         if session is not None:
             # 同一举报者冷却期内重复提交，只更新理由/记录，不增加独立举报人数。
@@ -1799,6 +1803,7 @@ class ZPReportAntiCheat(Plugin):
 
         self.report_cooldowns[cooldown_key] = now
         if category == "辱骂":
+            self.insult_report_cooldowns[cooldown_key] = now
             if mute_report_allowed:
                 self._apply_insult_report_mute(reporter, target, reason, report_id)
             else:
