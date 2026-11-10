@@ -10,8 +10,8 @@ ZP-AC 是一套面向 Minecraft Bedrock 1.26.60 的反作弊系统，采用**一
 ## 部署
 
 1. 将构建产物 `ZP-AC-2.1.9.mcaddon` 导入 Minecraft/Bedrock 服务端，并在目标世界启用行为包。
-2. 将 `endstone_zp_report_anticheat-0.8.0-py3-none-any.whl` 安装到 Endstone 0.11.15 / Python 3.11 环境。
-3. 重启服务器，确认日志中出现 ZP-AC 0.8.0 启用信息和行为包握手信息。
+2. 将 `endstone_zp_report_anticheat-0.9.0-py3-none-any.whl` 安装到 Endstone 0.11.15 / Python 3.11 环境。
+3. 重启服务器，确认日志中出现 ZP-AC 0.9.0 启用信息和行为包握手信息。
 
 兼容基线：Minecraft Bedrock 1.26.60.6、Protocol 2225、Endstone 0.11.15、Python 3.11、`@minecraft/server` 2.10.0、`@minecraft/server-ui` 2.2.0。
 
@@ -55,7 +55,7 @@ ZP-AC 是一套面向 Minecraft Bedrock 1.26.60 的反作弊系统，采用**一
 - 聊天记录只保存在内存，不写入磁盘；默认 10 分钟窗口、每名玩家最多 50 条，服务器重启后旧聊天记录自然清空。禁言状态和累计次数仍按 UUID 持久化在 `muted_players.json`，并保留备份恢复。
 - 禁言只取消聊天消息，不限制移动、战斗、交互或命令。管理员可执行 `/zpac mute <玩家名|UUID>` 查询状态，执行 `/zpac unmute <玩家名|UUID>` 提前解除；管理员/OP/豁免标签玩家不会被举报禁言。
 
-## 管理员证据与运行健康中心（Endstone 0.8.0）
+## 管理员证据与运行健康中心（Endstone 0.9.0）
 
 - `/zpac center` 或 `/zpac status`：查看在线玩家、监控会话、候选数量、检测开关、结构化证据数量及 Pulse P95/最大耗时。
 - `/zpac player <玩家名|UUID>`：查看该玩家公开信用分、内部风险/可信分和证据计数（管理员命令，仅服务端输出）。
