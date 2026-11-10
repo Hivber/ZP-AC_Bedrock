@@ -48,6 +48,8 @@ from .runtime_metrics import RuntimeMetrics
 from .mining_analysis import classify_mined_block, summarize_mining_events
 from .mute import DEFAULT_MUTE_DURATIONS_SECONDS, MuteStore
 from .chat_moderation import DEFAULT_INSULT_TERMS, RecentChatStore
+from .client_security import NativeClientRegistry
+from .client_bridge import NativeClientBridge
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -177,13 +179,16 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.9.0"
+    version = "1.0.0"
     commands = {
         "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
             "description": "管理 ZP 反作弊与云端 UUID 封禁同步。",
             "usages": [
                 "/zpac <action: str> [value: message]",
+                "/zpac clientpair <online-player>",
+                "/zpac clientrevoke <online-player|UUID>",
+                "/zpac clientstatus",
             ],
             "permissions": ["zp_report_anticheat.admin"],
         }
@@ -257,6 +262,12 @@ class ZPReportAntiCheat(Plugin):
             "insult_chat_window_seconds": 600,
             "insult_chat_max_messages_per_player": 50,
             "insult_detection_terms": list(DEFAULT_INSULT_TERMS),
+            "native_client_bridge_enabled": False,
+            "native_client_bridge_host": "0.0.0.0",
+            "native_client_bridge_port": 49376,
+            "native_client_tls_cert": "",
+            "native_client_tls_key": "",
+            "native_client_max_tokens_per_player": 3,
         }
         changed = False
         for key, value in defaults.items():
@@ -338,6 +349,24 @@ class ZPReportAntiCheat(Plugin):
         self._closing = False
         self._bp_last_ready = 0.0
         self._admin_request_last: dict[str, float] = {}
+        self.native_client_registry = NativeClientRegistry(
+            self.data_path / "native_clients.json",
+            max_tokens_per_player=int(self.cfg.get("native_client_max_tokens_per_player", 3)),
+        )
+        self._native_client_events: queue.Queue = queue.Queue(maxsize=1024)
+        self.native_client_connections: dict[str, float] = {}
+        self.native_client_latest: dict[str, dict[str, Any]] = {}
+        self.native_client_bridge = NativeClientBridge(
+            self.native_client_registry,
+            self._native_client_events,
+            host=str(self.cfg.get("native_client_bridge_host", "0.0.0.0")),
+            port=int(self.cfg.get("native_client_bridge_port", 49376)),
+            certificate=str(self.cfg.get("native_client_tls_cert", "")),
+            private_key=str(self.cfg.get("native_client_tls_key", "")),
+            logger=self.logger,
+        )
+        if bool(self.cfg.get("native_client_bridge_enabled", False)):
+            self.native_client_bridge.start()
 
         self.register_events(self)
         self._pulse_task = self.server.scheduler.run_task(
@@ -356,6 +385,10 @@ class ZPReportAntiCheat(Plugin):
         self._closing = True
         try:
             self._pulse_task.cancel()
+        except Exception:
+            pass
+        try:
+            self.native_client_bridge.stop()
         except Exception:
             pass
         try:
