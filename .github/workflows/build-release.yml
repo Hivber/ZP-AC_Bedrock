@@ -80,6 +80,12 @@ jobs:
           assert 'command: "zp_ac:ba"' in script
           assert "查看我的信用分" in script
           assert "举报其他玩家" in script
+          assert 'dropdown("§l§f第 1 项：选择举报玩家", targetNames)' in script
+          assert 'dropdown("§l§f第 2 项：选择举报类型", reportCategories)' in script
+          assert 'textField("§l§f第 3 项：填写举报原因（可留空）"' in script
+          for category in ("恶意破坏", "攻击玩家", "辱骂", "外挂", "透视", "其他"):
+              assert category in script
+          assert "category=category" in plugin
           assert "function openBaMenu(player)" in script
           assert "[REPORT_UI_CONFIG.command]: (player) => openBaMenu(player)" in script
           assert 'const ADMIN_UI_COMMAND = "zp_ac:admin"' in script
