@@ -77,6 +77,7 @@ class ZpAcClientBridge(
         buildId: String,
         integrity: JSONObject,
         runtime: JSONObject,
+        gameTelemetry: JSONObject = JSONObject(),
     ) {
         val activeToken = requireNotNull(token) { "Client is not paired" }
         val activeSession = requireNotNull(sessionId) { "Client is not connected" }
@@ -91,7 +92,8 @@ class ZpAcClientBridge(
                 .put("build_id", buildId)
                 .put("platform", "android")
                 .put("integrity", integrity)
-                .put("runtime", runtime))
+                .put("runtime", runtime)
+                .put("game", gameTelemetry))
         val canonical = canonical(unsigned)
         unsigned.put("signature", hmac(activeToken, canonical))
         send(unsigned)
