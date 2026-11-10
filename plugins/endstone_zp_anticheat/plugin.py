@@ -301,6 +301,7 @@ class ZPReportAntiCheat(Plugin):
         self.data_path = Path(self.data_folder)
         self.data_path.mkdir(parents=True, exist_ok=True)
         self._native_attestation_results: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
+        self._native_position_alert_last: dict[str, float] = {}
         self.native_attestation = NativeAttestationService(
             self.data_path / "native_client_registry.json",
             challenge_ttl_seconds=float(self.cfg.get("native_attestation_challenge_ttl_seconds", 45)),
@@ -430,6 +431,7 @@ class ZPReportAntiCheat(Plugin):
                 session["client_attestation_at"] = float(result.get("received_at", time.time()))
             self.metrics.increment("native_attestations_verified")
             claims = result.get("integrity_claims", {})
+            telemetry = result.get("telemetry", {})
             self._log(
                 "native_client_attestation_verified",
                 target_uuid=player_uuid,
@@ -439,14 +441,53 @@ class ZPReportAntiCheat(Plugin):
                 build_id=result.get("build_id", ""),
                 capabilities=result.get("capabilities", []),
                 integrity_claims=claims,
-                telemetry=result.get("telemetry", {}),
+                telemetry=telemetry,
                 action="signature_verified_telemetry_only_no_automatic_punishment",
             )
+            self._correlate_native_client_telemetry(player_uuid, telemetry)
             failed_claims = sorted(key for key, value in claims.items() if value is False)
             if failed_claims:
                 self._admin_alert(
                     f"§e原生客户端自检报告异常§r：UUID {player_uuid}；项目 {', '.join(failed_claims)}。仅为客户端自报线索，尚未独立验证，不自动处罚。"
                 )
+
+    def _correlate_native_client_telemetry(self, player_uuid: str, telemetry: dict[str, Any]) -> None:
+        """Compare signed client-reported position with the server snapshot as review-only evidence."""
+        if not isinstance(telemetry, dict):
+            return
+        keys = ("client_pos_x", "client_pos_y", "client_pos_z")
+        values = [telemetry.get(key) for key in keys]
+        if not all(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) for value in values):
+            return
+        player = next(
+            (candidate for candidate in list(self.server.online_players) if _player_key(candidate) == player_uuid),
+            None,
+        )
+        server_position = _xyz(getattr(player, "location", None)) if player is not None else None
+        if server_position is None:
+            return
+        client_position = tuple(float(value) for value in values)
+        delta = _distance(server_position, client_position)
+        try:
+            rtt_ms = max(0.0, min(1000.0, float(telemetry.get("network_rtt_ms", 0.0))))
+        except (TypeError, ValueError):
+            rtt_ms = 0.0
+        tolerance = 8.0 + min(12.0, rtt_ms * 0.02)
+        self._log(
+            "native_client_server_position_correlation",
+            target_uuid=player_uuid,
+            server_position=server_position,
+            client_position=client_position,
+            delta=round(delta, 3),
+            review_threshold=round(tolerance, 3),
+            action="correlation_only_no_risk_change_no_punishment",
+        )
+        now = time.monotonic()
+        if delta > tolerance and now - self._native_position_alert_last.get(player_uuid, 0.0) >= 60.0:
+            self._native_position_alert_last[player_uuid] = now
+            self._admin_alert(
+                f"§e双端位置遥测存在差异§r：UUID {player_uuid}；客户端与服务端位置差 {delta:.1f} 格。仅供复核，不自动处罚。"
+            )
 
     def _log(self, kind: str, **fields: Any) -> None:
         row = {
@@ -587,6 +628,7 @@ class ZPReportAntiCheat(Plugin):
         return {
             "target_uuid": key,
             "target_name": _player_name(target),
+            "client_mode": "standard_server_observed",
             "started": now,
             "last_evidence": now,
             "last_seen": now,
