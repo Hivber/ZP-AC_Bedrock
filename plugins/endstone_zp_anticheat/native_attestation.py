@@ -302,9 +302,11 @@ class NativeAttestationService:
             for key, value in telemetry.items():
                 if not isinstance(key, str):
                     continue
-                if isinstance(value, bool) or isinstance(value, int):
+                if isinstance(value, bool):
                     safe_telemetry[key[:48]] = value
-                elif isinstance(value, float) and math.isfinite(value):
+                elif isinstance(value, int) and abs(value) <= 10**12:
+                    safe_telemetry[key[:48]] = value
+                elif isinstance(value, float) and math.isfinite(value) and abs(value) <= 10**12:
                     safe_telemetry[key[:48]] = value
                 elif isinstance(value, str):
                     safe_telemetry[key[:48]] = value[:96]
