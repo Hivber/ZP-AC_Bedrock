@@ -100,6 +100,10 @@ jobs:
           assert "native_client_tls_cert" in config
           assert "NativeClientRegistry" in Path("plugins/endstone_zp_anticheat/client_security.py").read_text(encoding="utf-8")
           assert "allow_pair_attempt" in Path("plugins/endstone_zp_anticheat/client_bridge.py").read_text(encoding="utf-8")
+          assert "test_telemetry_schema_is_bounded" in Path("tests/test_client_security.py").read_text(encoding="utf-8")
+          assert "client_pos_x" in Path("plugins/endstone_zp_anticheat/client_security.py").read_text(encoding="utf-8")
+          assert "_correlate_native_client_position" in plugin
+          assert "gameTelemetry" in Path("native_client/android/ZpAcClientBridge.kt").read_text(encoding="utf-8")
           assert "test_pair_attempts_are_rate_limited_per_source_ip" in Path("tests/test_client_security.py").read_text(encoding="utf-8")
           assert "clientrevoke" in plugin
           assert "review_only_no_punishment" in plugin
