@@ -99,3 +99,7 @@ class EvidenceStore:
     def count(self) -> int:
         with self._lock:
             return len(self._read_jsonl(self.path))
+
+    def count_by_code(self, code: str) -> int:
+        with self._lock:
+            return sum(1 for row in self._read_jsonl(self.path) if row.get("code") == str(code))
