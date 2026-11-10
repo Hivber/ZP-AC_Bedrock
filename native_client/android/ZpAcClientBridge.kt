@@ -172,6 +172,7 @@ class ZpAcClientBridge(
                 }
                 override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
                     if (chain.isEmpty()) throw CertificateException("Server certificate is missing")
+                    chain[0].checkValidity()
                     val actual = MessageDigest.getInstance("SHA-256").digest(chain[0].encoded)
                         .joinToString("") { "%02x".format(it) }
                     if (!actual.equals(expected, ignoreCase = true)) {
