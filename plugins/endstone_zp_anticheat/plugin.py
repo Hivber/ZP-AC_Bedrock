@@ -985,7 +985,7 @@ class ZPReportAntiCheat(Plugin):
             sender.send_message("§c没有权限执行 ZP-AC 管理命令。需要 OP 或 zp_ac_admin 管理员标签。")
             return True
         if not args:
-            sender.send_message("§e用法：/zpac credit <玩家|UUID> | /zpac trust <玩家|UUID> | /zpac top [数量] | /zpac cloud <on|off|status|sync> | /zpac candidates | /zpac confirmban <UUID> | /zpac pardon <UUID>")
+            sender.send_message("§e用法：/zpac mute <玩家|UUID> | /zpac unmute <玩家|UUID> | /zpac credit <玩家|UUID> | /zpac trust <玩家|UUID> | /zpac top [数量] | /zpac cloud <on|off|status|sync> | /zpac candidates | /zpac confirmban <UUID> | /zpac pardon <UUID>")
             return True
         action = str(args[0]).lower()
         value = str(args[1]).strip() if len(args) > 1 else ""
