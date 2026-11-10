@@ -21,6 +21,7 @@ from endstone.event import (
     BlockBreakEvent,
     BlockPlaceEvent,
     PacketReceiveEvent,
+    PacketSendEvent,
     PlayerDimensionChangeEvent,
     PlayerGameModeChangeEvent,
     PlayerInteractEvent,
@@ -41,6 +42,9 @@ from .ai.onnx_engine import OnnxBehaviorModel
 from .movement import read_effect_amplifier, speed_effect_multiplier
 from .policy import has_independent_strong_evidence, profile_penalty
 from .credit import PUBLIC_CREDIT_DEFAULT, PUBLIC_CREDIT_LOCK_THRESHOLD, accrue_public_credit, can_damage_players, clamp_public_credit, is_retaliation_allowed, should_count_pvp_hit
+from .evidence_store import EvidenceStore
+from .runtime_metrics import RuntimeMetrics
+from .mining_analysis import classify_mined_block, summarize_mining_events
 
 
 MESSAGE_ID = "zp:report_submitted"
@@ -170,7 +174,7 @@ class ZPReportAntiCheat(Plugin):
     prefix = "ZP-AC"
     description = "ZP-AC增强层：隐藏可信画像、延迟感知检测、证据关联与UUID封禁复核"
     authors = ["ZP Server Tools"]
-    version = "0.6.9"
+    version = "0.7.0"
     commands = {
         "zp": {"description": "查看自己的 ZP 公开信用分。", "usages": ["/zp"], "permissions": ["zp_report_anticheat.credit"]},
         "zpac": {
@@ -244,6 +248,8 @@ class ZPReportAntiCheat(Plugin):
             "ai_api_enabled": False,
             "ai_api_key": "",
             "ai_api_endpoint": "",
+            "evidence_max_records": 10000,
+            "security_max_bridge_payload_bytes": 8192,
         }
         changed = False
         for key, value in defaults.items():
@@ -278,6 +284,13 @@ class ZPReportAntiCheat(Plugin):
         self.audit_path = Path(self.data_folder) / "evidence.jsonl"
         self.data_path = Path(self.data_folder)
         self.data_path.mkdir(parents=True, exist_ok=True)
+        self.evidence_store = EvidenceStore(
+            self.data_path / "evidence_records.jsonl",
+            self.data_path / "evidence_reviews.json",
+            max_records=int(self.cfg.get("evidence_max_records", 10000)),
+        )
+        self.metrics = RuntimeMetrics(sample_window=120)
+        self._pulse_last_ms = 0.0
 
         # 永久封禁表、云端缓存和撤销队列仅包含 UUID，不含玩家名。
         self.local_bans_path = self.data_path / "permanent_ban_uuids.json"
@@ -1004,6 +1017,108 @@ class ZPReportAntiCheat(Plugin):
             )
             return True
 
+        if action in {"center", "status", "health"}:
+            checks = self._anti_cheat_checks()
+            enabled = sum(1 for state in checks.values() if state)
+            metrics = self.metrics.snapshot()
+            pulse = metrics["durations"].get("pulse", {})
+            sender.send_message(
+                f"§8[§bZP-AC 管理中心§8] §f版本 {self.version}；在线玩家 {len(list(self.server.online_players))}；"
+                f"监控会话 {len(self.sessions)}；待复核候选 {len(self.ban_candidates)}。"
+            )
+            sender.send_message(
+                f"§7检测模块 {enabled}/{len(checks)} 启用；本地证据 {self.evidence_store.count()} 条；"
+                f"永久封禁 UUID {len(self.local_permanent_bans)}。"
+            )
+            sender.send_message(
+                f"§7Pulse 最近 {self._pulse_last_ms:.2f}ms；P95 {pulse.get('p95_ms', 0.0):.2f}ms；"
+                f"最大 {pulse.get('max_ms', 0.0):.2f}ms。"
+            )
+            sender.send_message("§e命令：/zpac evidence <玩家名|UUID> [1-10]；/zpac review <证据ID> <confirm|dismiss>；/zpac player <玩家名|UUID>；/zpac mining。")
+            return True
+
+        if action == "evidence":
+            target_uuid = self._resolve_player_uuid(value) if value else None
+            if not target_uuid:
+                sender.send_message("§e用法：/zpac evidence <在线玩家名|UUID> [数量]。")
+                return True
+            limit = 5
+            try:
+                limit = max(1, min(10, int(args[2]))) if len(args) > 2 else 5
+            except (TypeError, ValueError):
+                sender.send_message("§c数量必须为 1-10。")
+                return True
+            records = self.evidence_store.recent(target_uuid, limit)
+            if not records:
+                sender.send_message("§a该玩家暂无结构化检测证据。")
+                return True
+            sender.send_message(f"§8[§bZP-AC 证据中心§8] §7UUID={target_uuid}，最近 {len(records)} 条：")
+            for record in records:
+                review = record.get("review") or {}
+                status = review.get("status", "pending")
+                sender.send_message(
+                    f"§e{record.get('evidence_id', '')} §7{record.get('recorded_at', '')} "
+                    f"§f{record.get('title', record.get('code', 'unknown'))} "
+                    f"§7置信={'高' if record.get('high_confidence') else '辅助'} "
+                    f"复核={status}"
+                )
+                sender.send_message(f"§8{_clean(record.get('detail', ''), 180)}")
+            sender.send_message("§7复核只添加管理员审查标记，不会自动封禁或改变玩家分数。")
+            return True
+
+        if action == "review":
+            evidence_id = value
+            status_arg = str(args[2]).lower() if len(args) > 2 else ""
+            status_map = {"confirm": "confirmed", "confirmed": "confirmed", "dismiss": "dismissed", "dismissed": "dismissed"}
+            if status_arg not in status_map:
+                sender.send_message("§e用法：/zpac review <证据ID> <confirm|dismiss>。")
+                return True
+            try:
+                review = self.evidence_store.review(
+                    evidence_id, status_map[status_arg],
+                    _clean(getattr(sender, "name", "console"), 64),
+                )
+            except (ValueError, KeyError) as exc:
+                sender.send_message(f"§c证据复核失败：{_clean(str(exc), 120)}")
+                return True
+            self._log(
+                "evidence_review",
+                evidence_id=evidence_id,
+                status=review["status"],
+                reviewer=review["reviewer"],
+                action="annotation_only_no_automatic_punishment",
+            )
+            self.metrics.increment("evidence_reviews")
+            sender.send_message(f"§a证据 {evidence_id} 已标记为 {review['status']}。该操作仅记录复核结果，不自动处罚或改分。")
+            return True
+
+        if action == "player":
+            target_uuid = self._resolve_player_uuid(value) if value else None
+            if not target_uuid:
+                sender.send_message("§e用法：/zpac player <在线玩家名|UUID>。")
+                return True
+            profile = self._profile_for_uuid(target_uuid, create=False) or {}
+            credit = clamp_public_credit(profile.get("public_credit", self.cfg.get("public_credit_initial_score", PUBLIC_CREDIT_DEFAULT)))
+            sender.send_message(
+                f"§8[§bZP-AC 玩家档案§8] §7UUID={target_uuid} "
+                f"§f公开信用分 {credit:.1f}/100；§c风险 {float(profile.get('risk', 0.0)):.1f}/100；"
+                f"§a可信 {float(profile.get('trust', self.cfg.get('trust_initial_score', 50.0))):.1f}/100。"
+            )
+            sender.send_message(
+                f"§7证据累计 {int(profile.get('flags', 0))}；强证据 {int(profile.get('strong_flags', 0))}；"
+                f"规则计数 {len(profile.get('rule_counts', {}))}；最近规则 {_clean(profile.get('last_rule', '无'), 48) or '无'}。"
+            )
+            sender.send_message("§7详细证据：/zpac evidence <玩家名|UUID>。")
+            return True
+
+        if action == "mining":
+            sender.send_message(
+                f"§8[§bZP-AC 矿物防护§8] §f定向采矿分析：{'启用' if self._check_enabled('xray') else '关闭'}；"
+                f"记录证据 {self.evidence_store.count_by_code('xray_mining_pattern')} 条。"
+            )
+            sender.send_message("§e当前已具备 Endstone PacketSendEvent 出站包观察能力（LevelChunk=58、SubChunk=174）；本版本尚未启用协议 2225 区块负载改写器。矿物遮蔽仍处于待实现/验证状态，当前不会伪称已生效。")
+            return True
+
         if action == "top":
             count = 10
             try:
@@ -1261,6 +1376,11 @@ class ZPReportAntiCheat(Plugin):
     def _on_behavior_pack_admin_request(self, event: ScriptMessageEvent) -> None:
         if not bool(self.cfg.get("behavior_pack_bridge_enabled", True)):
             return
+        raw_message = event.message or ""
+        if len(raw_message.encode("utf-8", errors="ignore")) > int(self.cfg.get("security_max_bridge_payload_bytes", 8192)):
+            self.metrics.increment("rejected_admin_payload_oversize")
+            self.logger.warning("拒绝超出大小限制的 ZP-AC 管理桥接请求。")
+            return
         admin_name = ""
         request_id = ""
         try:
@@ -1275,6 +1395,7 @@ class ZPReportAntiCheat(Plugin):
 
             requester = self._find_online_player(admin_name)
             if requester is None or not self._is_admin_player(requester):
+                self.metrics.increment("rejected_admin_unauthorized")
                 self._send_admin_response(admin_name, request_id, False, error="管理员身份验证失败。")
                 return
 
@@ -1293,6 +1414,7 @@ class ZPReportAntiCheat(Plugin):
             now = time.monotonic()
             previous = self._admin_request_last.get(_player_key(requester) or admin_name, 0.0)
             if now - previous < 0.75:
+                self.metrics.increment("rejected_admin_rate_limit")
                 self._send_admin_response(admin_name, request_id, False, error="管理操作过于频繁，请稍后再试。")
                 return
             self._admin_request_last[_player_key(requester) or admin_name] = now
@@ -1315,6 +1437,8 @@ class ZPReportAntiCheat(Plugin):
                     "cloud_enabled": bool(self.cfg.get("cloud_enabled", False)),
                     "cloud_config_ready": cloud_ready,
                     "cloud_problem": cloud_problem,
+                    "evidence_count": self.evidence_store.count(),
+                    "runtime_metrics": self.metrics.snapshot(),
                 }
             elif action == "candidate_list":
                 candidates = sorted(
@@ -1475,6 +1599,12 @@ class ZPReportAntiCheat(Plugin):
     def _on_behavior_pack_evidence(self, event: ScriptMessageEvent) -> None:
         if not bool(self.cfg.get("behavior_pack_bridge_enabled", True)):
             return
+        sender = getattr(event, "sender", None)
+        sender_name = _clean(getattr(sender, "name", ""), 32).lower()
+        if not isinstance(sender, ConsoleCommandSender) and sender_name not in {"server", "console"}:
+            self.metrics.increment("rejected_behavior_evidence_sender")
+            self.logger.warning("忽略非服务端来源的行为包检测证据。")
+            return
         try:
             payload = json.loads(unquote(event.message or ""))
         except Exception as exc:
@@ -1530,6 +1660,12 @@ class ZPReportAntiCheat(Plugin):
 
     @event_handler
     def on_script_message(self, event: ScriptMessageEvent) -> None:
+        self.metrics.increment("script_events")
+        raw_payload = event.message or ""
+        if len(raw_payload.encode("utf-8", errors="ignore")) > int(self.cfg.get("security_max_bridge_payload_bytes", 8192)):
+            self.metrics.increment("rejected_script_event_oversize")
+            self.logger.warning("忽略超出大小限制的 ZP-AC ScriptEvent。")
+            return
         message_id = getattr(event, "message_id", "")
         if message_id == BP_CREDIT_REQUEST_ID:
             self._on_behavior_pack_credit_request(event)
@@ -1634,6 +1770,7 @@ class ZPReportAntiCheat(Plugin):
 
     @event_handler
     def on_player_move(self, event: PlayerMoveEvent) -> None:
+        self.metrics.increment("player_move_events")
         player = event.player
         key = _player_key(player)
         session = self.sessions.get(key or "")
@@ -1806,6 +1943,7 @@ class ZPReportAntiCheat(Plugin):
 
     @event_handler
     def on_actor_damage(self, event: ActorDamageEvent) -> None:
+        self.metrics.increment("damage_events")
         reach_enabled = self._check_enabled("reach")
         combat_enabled = self._check_enabled("combat")
         try:
@@ -1995,6 +2133,7 @@ class ZPReportAntiCheat(Plugin):
 
     @event_handler
     def on_block_break(self, event: BlockBreakEvent) -> None:
+        self.metrics.increment("block_break_events")
         player = event.player
         key = _player_key(player)
         session = self.sessions.get(key or "")
@@ -2013,55 +2152,34 @@ class ZPReportAntiCheat(Plugin):
             try:
                 block = event.block
                 block_type = str(block.type).lower().split(":")[-1]
-                ore_types = {
-                    "coal_ore", "deepslate_coal_ore", "copper_ore", "deepslate_copper_ore",
-                    "iron_ore", "deepslate_iron_ore", "gold_ore", "deepslate_gold_ore",
-                    "redstone_ore", "deepslate_redstone_ore", "lapis_ore", "deepslate_lapis_ore",
-                    "diamond_ore", "deepslate_diamond_ore", "emerald_ore",
-                    "deepslate_emerald_ore", "ancient_debris",
-                }
-                rock_tokens = (
-                    "stone", "deepslate", "netherrack", "blackstone", "basalt",
-                    "tuff", "granite", "diorite", "andesite", "calcite", "gravel",
-                )
-                is_ore = block_type in ore_types
-                is_rock = any(token in block_type for token in rock_tokens)
-                if is_ore or is_rock:
+                block_class = classify_mined_block(block_type)
+                if block_class is not None:
                     mining = session.setdefault("xray_mining_events", deque())
                     dimension = self._dimension_key(player)
                     mining.append((
                         now, dimension, int(block.x), int(block.y), int(block.z),
-                        block_type, "ore" if is_ore else "rock",
+                        block_type, block_class,
                     ))
                     if bool(self.cfg.get("ai_enabled", True)):
-                        self.ai_engine.observe(key or "", "ore" if is_ore else "rock", 1.0, now)
+                        self.ai_engine.observe(key or "", block_class, 1.0, now)
                     window = max(30.0, float(self.cfg.get("xray_window_seconds", 180.0)))
                     while mining and now - mining[0][0] > window:
                         mining.popleft()
 
                     recent = [row for row in mining if row[1] == dimension]
-                    ore_rows = [row for row in recent if row[6] == "ore"]
-                    rock_count = sum(1 for row in recent if row[6] == "rock")
-                    ore_count = len(ore_rows)
-                    rare_names = {
-                        "diamond_ore", "deepslate_diamond_ore",
-                        "emerald_ore", "deepslate_emerald_ore", "ancient_debris",
-                    }
-                    rare_count = sum(1 for row in ore_rows if row[5] in rare_names)
-                    anchors: list[tuple[float, float, float]] = []
-                    cluster_distance = max(3.0, float(self.cfg.get("xray_cluster_distance", 5.5)))
-                    for row in ore_rows:
-                        point = (float(row[2]), float(row[3]), float(row[4]))
-                        if all(_distance(point, anchor) > cluster_distance for anchor in anchors):
-                            anchors.append(point)
-
-                    total_mined = ore_count + rock_count
-                    ore_ratio = ore_count / total_mined if total_mined else 0.0
+                    summary = summarize_mining_events(
+                        recent, float(self.cfg.get("xray_cluster_distance", 5.5))
+                    )
+                    rock_count = summary["rock_count"]
+                    ore_count = summary["ore_count"]
+                    rare_count = summary["rare_count"]
+                    anchors = summary["cluster_anchors"]
+                    ore_ratio = summary["ore_ratio"]
                     enough_evidence = (
                         rock_count >= int(self.cfg.get("xray_min_rock_blocks", 40))
                         and ore_count >= int(self.cfg.get("xray_min_ore_blocks", 5))
                         and rare_count >= int(self.cfg.get("xray_min_rare_ores", 2))
-                        and len(anchors) >= int(self.cfg.get("xray_min_clusters", 3))
+                        and summary["cluster_count"] >= int(self.cfg.get("xray_min_clusters", 3))
                         and ore_ratio >= float(self.cfg.get("xray_min_ore_ratio", 0.08))
                     )
                     if enough_evidence:
@@ -2072,10 +2190,22 @@ class ZPReportAntiCheat(Plugin):
                             (
                                 f"最近 {window:.0f} 秒挖掘 {rock_count} 个岩石类方块、"
                                 f"{ore_count} 个矿物方块（高价值矿物 {rare_count} 个），"
-                                f"分布约 {len(anchors)} 个独立矿脉，矿物占比 {ore_ratio:.1%}。"
+                                f"分布约 {summary['cluster_count']} 个独立矿脉，矿物占比 {ore_ratio:.1%}；"
+                                f"矿物类型：{', '.join(summary['ore_types'][:8])}。"
                                 "这是异常定向采矿辅助线索；洞穴、矿脉密集区、效率工具和地图生成均可能造成相似结果。"
                             ),
                             high_confidence=False,
+                            context={
+                                "dimension": dimension,
+                                "window_seconds": window,
+                                "rock_count": rock_count,
+                                "ore_count": ore_count,
+                                "rare_ore_count": rare_count,
+                                "ore_ratio": round(ore_ratio, 4),
+                                "cluster_count": summary["cluster_count"],
+                                "ore_types": summary["ore_types"],
+                                "cluster_anchors": summary["cluster_anchors"],
+                            },
                         )
                         mining.clear()
             except Exception as exc:
@@ -2199,7 +2329,21 @@ class ZPReportAntiCheat(Plugin):
     # ----------------------------- packet observation -----------------------------
 
     @event_handler
+    def on_packet_send(self, event: PacketSendEvent) -> None:
+        """Observe outgoing chunk traffic without mutating client-visible world data."""
+        self.metrics.increment("packet_send_events")
+        try:
+            packet_id = int(event.packet_id)
+            if packet_id == 58:  # LevelChunk, protocol 2225
+                self.metrics.increment("outgoing_level_chunk_packets")
+            elif packet_id == 174:  # SubChunk, protocol 2225
+                self.metrics.increment("outgoing_subchunk_packets")
+        except Exception:
+            self.metrics.increment("packet_send_observer_errors")
+
+    @event_handler
     def on_packet_receive(self, event: PacketReceiveEvent) -> None:
+        self.metrics.increment("packet_receive_events")
         if not bool(self.cfg.get("packet_telemetry", True)):
             return
         try:
@@ -2229,7 +2373,8 @@ class ZPReportAntiCheat(Plugin):
 
     # ----------------------------- evidence, scoring, kick -----------------------------
 
-    def _flag(self, player: Any, session: dict[str, Any], code: str, detail: str, high_confidence: bool) -> None:
+    def _flag(self, player: Any, session: dict[str, Any], code: str, detail: str, high_confidence: bool, context: dict[str, Any] | None = None) -> None:
+        self.metrics.increment("evidence_flags")
         check_key = RULE_CHECK_GROUP.get(code)
         if check_key and not self._check_enabled(check_key):
             return
@@ -2258,7 +2403,23 @@ class ZPReportAntiCheat(Plugin):
             "detail": _clean(detail, 360),
             "points": points,
             "high_confidence": bool(high_confidence),
+            "context": context or {},
         }
+        try:
+            self.evidence_store.append({
+                "target_uuid": session.get("target_uuid", ""),
+                "target_name": _clean(session.get("target_name", ""), 64),
+                "code": code,
+                "title": title,
+                "detail": _clean(detail, 360),
+                "points": points,
+                "session_score": session["score"],
+                "reporter_count": len(session["reporters"]),
+                "high_confidence": bool(high_confidence),
+                "context": context or {},
+            })
+        except Exception as exc:
+            self.logger.warning(f"写入结构化证据索引失败：{type(exc).__name__}")
         session["evidence"].append(evidence)
         session["evidence"] = session["evidence"][-30:]
         self._admin_alert(
@@ -2383,6 +2544,8 @@ class ZPReportAntiCheat(Plugin):
     # ----------------------------- session lifecycle -----------------------------
 
     def _pulse(self) -> None:
+        pulse_started = time.perf_counter()
+        self.metrics.increment("pulse_runs")
         self._drain_cloud_results()
         now = time.monotonic()
         self._sync_operator_admin_tags()
@@ -2441,6 +2604,9 @@ class ZPReportAntiCheat(Plugin):
                 self._end_session(key, session, "maximum_time")
             elif elapsed >= min_seconds and quiet >= quiet_seconds:
                 self._end_session(key, session, "clean")
+        self._pulse_last_ms = (time.perf_counter() - pulse_started) * 1000.0
+        self.metrics.observe_ms("pulse", self._pulse_last_ms)
+        self.metrics.observe_ms("players_per_pulse", float(len(online)))
 
     def _run_ai_analysis(self, player: Any, session: dict[str, Any], now: float) -> None:
         """Run local review-only behavior analysis; never changes risk or punishment state."""

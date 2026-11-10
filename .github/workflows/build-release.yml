@@ -61,8 +61,8 @@ jobs:
           assert manifest["header"]["version"] == [2, 1, 9]
           assert manifest["modules"][0]["version"] == [2, 1, 9]
           assert manifest["header"]["min_engine_version"] == [1, 26, 60]
-          assert project["project"]["version"] == "0.6.9"
-          assert 'version = "0.6.9"' in plugin
+          assert project["project"]["version"] == "0.7.0"
+          assert 'version = "0.7.0"' in plugin
           assert resource_manifest["header"]["version"] == [1, 0, 0]
           assert resource_manifest["header"]["min_engine_version"] == [1, 26, 60]
           assert resource_manifest["modules"][0]["type"] == "resources"
@@ -132,6 +132,16 @@ jobs:
           assert "def speed_effect_multiplier(" in movement
           assert "read_effect_amplifier" in plugin
           assert "speed_effect_multiplier" in plugin
+          assert "EvidenceStore" in plugin
+          assert "RuntimeMetrics" in plugin
+          assert "summarize_mining_events" in plugin
+          assert "PacketSendEvent" in plugin
+          assert "outgoing_level_chunk_packets" in plugin
+          assert "outgoing_subchunk_packets" in plugin
+          assert "security_max_bridge_payload_bytes" in plugin
+          assert "def review(" in Path("plugins/endstone_zp_anticheat/evidence_store.py").read_text(encoding="utf-8")
+          assert "def snapshot(" in Path("plugins/endstone_zp_anticheat/runtime_metrics.py").read_text(encoding="utf-8")
+          assert "test_append_recent_and_review_are_persistent" in Path("tests/test_security_modules.py").read_text(encoding="utf-8")
           assert "ai_api_enabled = false" in Path("plugins/endstone_zp_anticheat/config.toml").read_text(encoding="utf-8")
           assert config["anti_cheat_checks"]["xray"] is True
           assert '.toggle(rows[0][1], { defaultValue: isCheckEnabled("speed") })' in script
@@ -156,7 +166,7 @@ jobs:
       - name: Upload ZP-AC packages
         uses: actions/upload-artifact@v5
         with:
-          name: ZP-AC-2.1.9-and-Endstone-0.6.9
+          name: ZP-AC-2.1.9-and-Endstone-0.7.0
           path: |
             dist/*.mcaddon
             dist/*.whl
