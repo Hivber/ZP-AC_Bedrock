@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import secrets
 import threading
 import time
@@ -159,7 +160,13 @@ def validate_telemetry(data: Any) -> dict[str, Any] | None:
         return None
     integrity_source = data.get("integrity", {})
     runtime_source = data.get("runtime", {})
-    if not isinstance(integrity_source, dict) or not isinstance(runtime_source, dict):
+    game_source = data.get("game", {})
+    if (
+        not isinstance(integrity_source, dict)
+        or not isinstance(runtime_source, dict)
+        or not isinstance(game_source, dict)
+        or len(game_source) > 12
+    ):
         return None
     integrity_keys = {
         "app_signature_valid", "package_name_valid", "debugger_detected",
@@ -189,10 +196,29 @@ def validate_telemetry(data: Any) -> dict[str, Any] | None:
     platform = str(data.get("platform", "unknown"))[:24].lower()
     if platform not in {"android", "windows", "ios", "unknown"}:
         return None
+    game: dict[str, float] = {}
+    position_keys = ("client_pos_x", "client_pos_y", "client_pos_z")
+    position_values = [game_source.get(key) for key in position_keys]
+    if any(value is not None for value in position_values):
+        if not all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and abs(float(value)) <= 30_000_000
+            for value in position_values
+        ):
+            return None
+        game.update({key: float(value) for key, value in zip(position_keys, position_values)})
+    if "network_rtt_ms" in game_source:
+        rtt = game_source["network_rtt_ms"]
+        if isinstance(rtt, bool) or not isinstance(rtt, (int, float)) or not math.isfinite(float(rtt)) or not 0 <= float(rtt) <= 1000:
+            return None
+        game["network_rtt_ms"] = float(rtt)
     return {
         "client_version": str(data.get("client_version", ""))[:32],
         "build_id": str(data.get("build_id", ""))[:64],
         "platform": platform,
         "integrity": integrity,
         "runtime": runtime,
+        "game": game,
     }
