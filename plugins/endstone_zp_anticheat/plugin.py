@@ -50,6 +50,9 @@ BP_EVIDENCE_ID = "zp:ac_bp_evidence"
 BP_ADMIN_REQUEST_ID = "zp:ac_admin_request"
 BP_ADMIN_RESPONSE_ID = "zp:ac_admin_response"
 BP_ADMIN_PROTOCOL = "zp-ac-admin-v1"
+BP_CREDIT_REQUEST_ID = "zp:credit_request"
+BP_CREDIT_RESPONSE_ID = "zp:credit_response"
+BP_CREDIT_PROTOCOL = "zp-credit-v1"
 BP_CHECKS_SYNC_ID = "zp:ac_checks_sync"
 BP_CHECKS_PROTOCOL = "zp-ac-checks-v1"
 BP_OP_ADMIN_TAG = "zp_ac_op_admin"
@@ -1185,6 +1188,56 @@ class ZPReportAntiCheat(Plugin):
         except Exception as exc:
             self.logger.warning(f"发送 ZP-AC 管理响应失败：{type(exc).__name__}")
 
+    def _send_public_credit_response(
+        self, request_id: str, player_name: str, ok: bool,
+        score: float = 0.0, error: str = "",
+    ) -> None:
+        payload = {
+            "version": BP_CREDIT_PROTOCOL,
+            "requestId": _clean(request_id, 100),
+            "playerName": _clean(player_name, 64),
+            "ok": bool(ok),
+            "score": round(clamp_public_credit(score), 2) if ok else 0.0,
+            "lockThreshold": float(self.cfg.get("public_credit_lock_threshold", PUBLIC_CREDIT_LOCK_THRESHOLD)),
+            "recoveryPerHour": float(self.cfg.get("public_credit_recovery_per_hour", 0.5)),
+            "error": _clean(error, 160),
+        }
+        encoded = base64.b64encode(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).decode("ascii")
+        try:
+            sent = self.server.dispatch_command(self.server.command_sender, f"scriptevent {BP_CREDIT_RESPONSE_ID} b64:{encoded}")
+            if not sent: self.logger.warning("ZP-AC 公开信用分响应 ScriptEvent 未执行。")
+        except Exception as exc:
+            self.logger.warning(f"发送公开信用分响应失败：{type(exc).__name__}")
+
+    def _on_behavior_pack_credit_request(self, event: ScriptMessageEvent) -> None:
+        sender = getattr(event, "sender", None)
+        if not isinstance(sender, ConsoleCommandSender) and _clean(getattr(sender, "name", ""), 32).lower() not in {"server", "console"}:
+            self.logger.warning("忽略非服务端来源的公开信用分查询请求。")
+            return
+        request_id = ""
+        player_name = ""
+        try:
+            raw = event.message or ""
+            decoded = base64.b64decode(raw[4:], validate=True).decode("utf-8") if raw.startswith("b64:") else unquote(raw)
+            payload = json.loads(decoded)
+            if not isinstance(payload, dict) or payload.get("version") != BP_CREDIT_PROTOCOL: return
+            request_id = _clean(payload.get("requestId"), 100)
+            player_name = _clean(payload.get("playerName"), 64)
+            if not request_id or not player_name: return
+            player = self._find_online_player(player_name)
+            if player is None or _player_name(player).casefold() != player_name.casefold():
+                self._send_public_credit_response(request_id, player_name, False, error="未找到在线玩家，请重新打开菜单。")
+                return
+            player_uuid = _player_key(player)
+            if not player_uuid:
+                self._send_public_credit_response(request_id, player_name, False, error="服务器未能取得稳定玩家 UUID；请检查在线身份验证设置。")
+                return
+            profile = self._profile_for_uuid(player_uuid)
+            self._send_public_credit_response(request_id, player_name, True, score=clamp_public_credit(profile.get("public_credit", PUBLIC_CREDIT_DEFAULT)))
+        except Exception as exc:
+            self.logger.warning(f"处理公开信用分查询失败：{type(exc).__name__}: {_clean(str(exc), 120)}")
+            if request_id: self._send_public_credit_response(request_id, player_name, False, error="服务器查询发生内部错误，请联系管理员。")
+
     def _on_behavior_pack_checks_sync(self, event: ScriptMessageEvent) -> None:
         if not bool(self.cfg.get("behavior_pack_bridge_enabled", True)):
             return
@@ -1478,6 +1531,9 @@ class ZPReportAntiCheat(Plugin):
     @event_handler
     def on_script_message(self, event: ScriptMessageEvent) -> None:
         message_id = getattr(event, "message_id", "")
+        if message_id == BP_CREDIT_REQUEST_ID:
+            self._on_behavior_pack_credit_request(event)
+            return
         if message_id == BP_CHECKS_SYNC_ID:
             self._on_behavior_pack_checks_sync(event)
             return
