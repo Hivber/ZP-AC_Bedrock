@@ -60,6 +60,19 @@ insult_detection_terms = ["傻逼", "傻比", "傻屄", "煞笔", "傻b", "sb", 
 # 第 1-7 次确认违规分别为 10 分钟、30 分钟、1 小时、3 小时、6 小时、12 小时、24 小时。
 insult_mute_durations_seconds = [600, 1800, 3600, 10800, 21600, 43200, 86400]
 
+# 原生客户端双模式验证（默认关闭；普通 Bedrock 客户端无需配置，继续使用服务端检测）。
+# 启用后，原生客户端可通过 P-256 设备密钥完成配对，并使用一次性随机挑战上报签名遥测。
+# 监听建议绑定 127.0.0.1，再由 Caddy/Nginx 等 TLS 反向代理对外提供 HTTPS。
+native_attestation_enabled = false
+native_attestation_bind_host = "127.0.0.1"
+native_attestation_bind_port = 9179
+native_attestation_tls_cert = ""
+native_attestation_tls_key = ""
+# 填写原生客户端实际访问的 HTTPS 地址；仅用于管理员配对提示。
+native_client_public_url = ""
+native_attestation_challenge_ttl_seconds = 45
+native_attestation_pairing_ttl_seconds = 300
+
 # 插件会观察 PacketReceiveEvent 的包 ID 和每秒数量。
 # 未配置并验证 26.60 对应数据包 ID 前，不会仅凭包频率踢出。
 packet_telemetry = true
