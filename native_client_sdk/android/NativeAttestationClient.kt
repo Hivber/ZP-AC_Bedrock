@@ -31,7 +31,7 @@ class NativeAttestationClient(
     private val clientVersion: String,
     private val buildId: String,
     private val keyAlias: String = "zp_ac_native_" +
-        MessageDigest.getInstance("SHA-256").digest(playerUuid.toByteArray())
+        MessageDigest.getInstance("SHA-256").digest(java.util.UUID.fromString(playerUuid).toString().toByteArray())
             .take(12).joinToString("") { "%02x".format(it) }
 ) {
     companion object {
@@ -40,6 +40,7 @@ class NativeAttestationClient(
     }
 
     private val normalizedBaseUrl = baseUrl.trimEnd('/')
+    private val canonicalPlayerUuid = java.util.UUID.fromString(playerUuid).toString()
 
     init {
         require(normalizedBaseUrl.startsWith("https://")) {
@@ -118,11 +119,11 @@ class NativeAttestationClient(
     fun enroll(pairingCode: String): JSONObject {
         val pair = keyPair()
         val id = keyId(pair)
-        val proofMessage = "zp-ac-enroll-v1|$playerUuid|$id|$pairingCode".toByteArray(Charsets.UTF_8)
+        val proofMessage = "zp-ac-enroll-v1|$canonicalPlayerUuid|$id|$pairingCode".toByteArray(Charsets.UTF_8)
         return post(
             "/v1/enroll",
             JSONObject()
-                .put("player_uuid", playerUuid)
+                .put("player_uuid", canonicalPlayerUuid)
                 .put("key_id", id)
                 .put("public_key_pem", publicKeyPem(pair))
                 .put("pairing_code", pairingCode)
