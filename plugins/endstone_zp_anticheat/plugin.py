@@ -457,7 +457,7 @@ class ZPReportAntiCheat(Plugin):
             return
         keys = ("client_pos_x", "client_pos_y", "client_pos_z")
         values = [telemetry.get(key) for key in keys]
-        if not all(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) for value in values):
+        if not all(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) and abs(float(value)) <= 30_000_000 for value in values):
             return
         player = next(
             (candidate for candidate in list(self.server.online_players) if _player_key(candidate) == player_uuid),
