@@ -150,3 +150,10 @@ ai_onnx_review_threshold = 0.90
 ai_dataset_enabled = true
 ai_dataset_interval_seconds = 30.0
 ai_dataset_max_bytes = 20000000
+
+
+# 结构化证据中心：只保存在本地插件数据目录，不上传云端。
+evidence_max_records = 10000
+
+# ScriptEvent 桥接输入上限，超限消息直接拒绝。
+security_max_bridge_payload_bytes = 8192
