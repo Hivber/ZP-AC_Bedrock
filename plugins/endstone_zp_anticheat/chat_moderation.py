@@ -24,7 +24,7 @@ def normalize_chat_text(value: Any) -> str:
         and not char.isspace()
         and not unicodedata.category(char).startswith(("P", "S"))
     )
-    return re.sub(r"(.)\\1{2,}", r"\\1\\1", text)
+    return re.sub(r"(.)\1{2,}", r"\1\1", text)
 
 
 def detect_insult_terms(message: Any, terms: Iterable[str] = DEFAULT_INSULT_TERMS) -> tuple[str, ...]:
