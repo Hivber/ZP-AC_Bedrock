@@ -110,6 +110,7 @@ class _ClientHandler(socketserver.StreamRequestHandler):
             owner._register_connection(player_uuid, self.request)
             owner.events.put({"kind": "connected", "player_uuid": player_uuid, "at": time.time()})
             last_sequence = 0
+            last_received_at = 0.0
             self.request.settimeout(25.0)
             while not owner.stopping.is_set():
                 message = self._read()
@@ -121,12 +122,15 @@ class _ClientHandler(socketserver.StreamRequestHandler):
                 timestamp = message.get("timestamp")
                 if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= last_sequence:
                     continue
+                if time.monotonic() - last_received_at < 1.0:
+                    continue
                 if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or abs(time.time() - float(timestamp)) > 120:
                     continue
                 data = validate_telemetry(message.get("data"))
                 if data is None or not owner.registry.verify_payload(token, message, str(message.get("signature", ""))):
                     continue
                 last_sequence = sequence
+                last_received_at = time.monotonic()
                 owner.events.put({
                     "kind": "telemetry",
                     "player_uuid": player_uuid,
