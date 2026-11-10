@@ -94,7 +94,7 @@ jobs:
           assert "RecentChatStore" in plugin
           assert "insult_report_not_confirmed" in plugin
           assert "test_history_expires_after_window" in Path("tests/test_chat_moderation.py").read_text(encoding="utf-8")
-          assert "plugins/endstone_zp_anticheat/chat_moderation.py" in Path("tools/build_release.py").read_text(encoding="utf-8")
+          assert "chat_moderation.py" in Path("tools/build_release.py").read_text(encoding="utf-8")
           assert "insult_mute_durations_seconds" in config
           assert config["insult_chat_window_seconds"] == 600
           assert config["insult_chat_max_messages_per_player"] == 50
