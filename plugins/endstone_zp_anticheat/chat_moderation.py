@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 DEFAULT_INSULT_TERMS = (
     "傻逼", "傻比", "傻屄", "煞笔", "傻b", "sb",
-    "脑残", "脑瘫", "智障", "废物", "垃圾", "狗东西",
+    "脑残", "脑瘫", "智障", "废物", "你是垃圾", "你真垃圾", "垃圾玩家", "狗东西",
     "狗杂种", "王八蛋", "婊子", "贱人", "臭婊子",
     "操你妈", "草泥马", "cnm", "nmsl", "去死",
 )
@@ -34,7 +34,13 @@ def detect_insult_terms(message: Any, terms: Iterable[str] = DEFAULT_INSULT_TERM
     matches: list[str] = []
     for term in terms:
         candidate = normalize_chat_text(term)
-        if candidate and candidate in normalized and term not in matches:
+        if not candidate:
+            continue
+        if candidate.isascii() and candidate.isalnum():
+            matched = re.search(r"(?<![a-z0-9])" + re.escape(candidate) + r"(?![a-z0-9])", normalized) is not None
+        else:
+            matched = candidate in normalized
+        if matched and term not in matches:
             matches.append(str(term))
     return tuple(matches)
 
