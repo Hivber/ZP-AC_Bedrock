@@ -37,7 +37,7 @@ class ChatModerationTests(unittest.TestCase):
     def test_history_expires_after_window(self):
         store = RecentChatStore(window_seconds=60, max_messages_per_player=5)
         store.record("uuid-a", "你是傻逼", now=100)
-        self.assertEqual(store.find_insults("uuid-a", now=159), [])
+        self.assertEqual(len(store.find_insults("uuid-a", now=159)), 1)
         self.assertEqual(store.find_insults("uuid-a", now=160), [])
 
     def test_history_is_bounded(self):
