@@ -250,7 +250,7 @@ class NativeAttestationService:
             record = self._registry.get(player_uuid)
             if player_uuid not in self._online:
                 raise ValueError("player is not online")
-            if not challenge or challenge["expires_at"] < now:
+            if not challenge or challenge["expires_at"] <= now:
                 raise ValueError("challenge expired or already used")
             if challenge["player_uuid"] != player_uuid or challenge["key_id"] != key_id or challenge["nonce"] != nonce:
                 raise ValueError("challenge binding mismatch")
@@ -259,6 +259,8 @@ class NativeAttestationService:
             sequence = int(payload.get("sequence", -1))
             if sequence != challenge["sequence"] or sequence <= int(record.get("last_sequence", 0)):
                 raise ValueError("invalid or replayed sequence")
+            if payload.get("protocol") != PROTOCOL_VERSION:
+                raise ValueError("protocol mismatch")
             signed_payload = {k: v for k, v in payload.items() if k != "signature"}
             if len(canonical_json(signed_payload)) > MAX_BODY_BYTES:
                 raise ValueError("attestation payload too large")
@@ -274,6 +276,17 @@ class NativeAttestationService:
                 str(k)[:48]: bool(v) for k, v in integrity.items()
                 if isinstance(k, str) and isinstance(v, bool)
             }
+            telemetry = payload.get("telemetry", {})
+            if not isinstance(telemetry, dict) or len(telemetry) > 32:
+                raise ValueError("invalid telemetry")
+            safe_telemetry: dict[str, Any] = {}
+            for key, value in telemetry.items():
+                if not isinstance(key, str):
+                    continue
+                if isinstance(value, (bool, int, float)):
+                    safe_telemetry[key[:48]] = value
+                elif isinstance(value, str):
+                    safe_telemetry[key[:48]] = value[:96]
             result = {
                 "player_uuid": player_uuid,
                 "key_id": key_id,
@@ -282,6 +295,7 @@ class NativeAttestationService:
                 "build_id": str(payload.get("build_id", ""))[:96],
                 "capabilities": safe_capabilities,
                 "integrity_claims": safe_integrity,
+                "telemetry": safe_telemetry,
                 "signature_verified": True,
                 "received_at": now,
             }
@@ -292,6 +306,7 @@ class NativeAttestationService:
                 "build_id": result["build_id"],
                 "capabilities": safe_capabilities,
                 "integrity_claims": safe_integrity,
+                "telemetry": safe_telemetry,
                 "signature_verified": True,
             })
             self._save_registry()
@@ -327,6 +342,7 @@ class NativeAttestationService:
                 "last_sequence": int(record.get("last_sequence", 0)),
                 "capabilities": list(record.get("capabilities", [])),
                 "integrity_claims": dict(record.get("integrity_claims", {})),
+                "telemetry": dict(record.get("telemetry", {})),
                 "signature_verified": bool(record.get("signature_verified", False)),
             }
 
@@ -339,6 +355,10 @@ class NativeAttestationService:
             if len(bucket) >= limit:
                 return False
             bucket.append(now)
+            if len(self._rates) > 2048:
+                oldest = min(self._rates, key=lambda key: self._rates[key][0] if self._rates[key] else 0.0)
+                if oldest != remote:
+                    self._rates.pop(oldest, None)
             return True
 
 
@@ -360,6 +380,8 @@ class NativeAttestationHTTPServer:
         self.thread: threading.Thread | None = None
 
     def start(self) -> None:
+        if bool(self.certfile) != bool(self.keyfile):
+            raise ValueError("both TLS certificate and key paths are required")
         if self.host not in LOOPBACK_HOSTS and not (self.certfile and self.keyfile):
             raise ValueError("non-loopback native attestation listener requires TLS certificate and key; use a TLS reverse proxy otherwise")
         service = self.service
