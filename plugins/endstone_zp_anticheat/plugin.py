@@ -1768,14 +1768,13 @@ class ZPReportAntiCheat(Plugin):
                 pass
             return
 
-        if category == "辱骂":
-            self._apply_insult_report_mute(reporter, target, reason, report_id)
-
         now = time.monotonic()
         target_key = _player_key(target)
         reporter_key = _player_key(reporter) or reporter_name.casefold()
         cooldown_key = (target_key or target_name.casefold(), reporter_key)
         cooldown = float(self.cfg.get("reporter_target_cooldown_seconds", 600))
+        previous_report_at = self.report_cooldowns.get(cooldown_key)
+        mute_report_allowed = previous_report_at is None or now - previous_report_at >= cooldown
         session = self.sessions.get(target_key or "")
         if session is not None:
             # 同一举报者冷却期内重复提交，只更新理由/记录，不增加独立举报人数。
@@ -1799,6 +1798,21 @@ class ZPReportAntiCheat(Plugin):
             is_new_reporter = True
 
         self.report_cooldowns[cooldown_key] = now
+        if category == "辱骂":
+            if mute_report_allowed:
+                self._apply_insult_report_mute(reporter, target, reason, report_id)
+            else:
+                try:
+                    reporter.send_message("§e该目标的辱骂举报仍在 10 分钟冷却期内，本次已记录但不会重复增加禁言等级。")
+                except Exception:
+                    pass
+                self._log(
+                    "insult_report_mute_cooldown",
+                    target_uuid=target_key,
+                    reporter_uuid=reporter_key,
+                    report_id=report_id,
+                    action="no_repeat_escalation_within_report_cooldown",
+                )
         tier = self._tier(len(session["reporters"]))
         self._admin_alert(
             f"已接收举报：§e{target_name}§r；独立举报者 {len(session['reporters'])} 人；检测等级 T{tier}。"
