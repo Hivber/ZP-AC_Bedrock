@@ -2857,6 +2857,7 @@ class ZPReportAntiCheat(Plugin):
                 continue
             self.native_client_last_seen[player_uuid] = float(event.get("at", time.time()))
             self.native_client_latest[player_uuid] = data
+            self._correlate_native_client_position(player_uuid, data)
             integrity = data.get("integrity", {})
             if not isinstance(integrity, dict):
                 continue
@@ -2907,6 +2908,68 @@ class ZPReportAntiCheat(Plugin):
                 f"§e原生客户端完整性提示§r：UUID §7{player_uuid[:12]}…§r；"
                 f"{detail}。该结果来自客户端自报，不会自动处罚。"
             )
+
+    def _correlate_native_client_position(self, player_uuid: str, data: dict[str, Any]) -> None:
+        """Compare signed native-client position claims to server state; review only."""
+        game = data.get("game", {})
+        if not isinstance(game, dict):
+            return
+        keys = ("client_pos_x", "client_pos_y", "client_pos_z")
+        values = [game.get(key) for key in keys]
+        if not all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and abs(float(value)) <= 30_000_000
+            for value in values
+        ):
+            return
+        player = next(
+            (candidate for candidate in list(self.server.online_players) if _player_key(candidate) == player_uuid),
+            None,
+        )
+        server_position = _xyz(getattr(player, "location", None)) if player is not None else None
+        if server_position is None:
+            return
+        client_position = tuple(float(value) for value in values)
+        delta = _distance(server_position, client_position)
+        try:
+            rtt_ms = max(0.0, min(1000.0, float(game.get("network_rtt_ms", 0.0))))
+        except (TypeError, ValueError):
+            rtt_ms = 0.0
+        tolerance = 8.0 + min(12.0, rtt_ms * 0.02)
+        self._log(
+            "native_client_server_position_correlation",
+            target_uuid=player_uuid,
+            server_position=server_position,
+            client_position=client_position,
+            delta=round(delta, 3),
+            review_threshold=round(tolerance, 3),
+            action="correlation_only_no_risk_change_no_punishment",
+        )
+        if delta <= tolerance:
+            return
+        cooldown_key = (player_uuid, "position_delta")
+        now = time.monotonic()
+        if now - self.native_client_alert_cooldowns.get(cooldown_key, 0.0) < 300.0:
+            return
+        self.native_client_alert_cooldowns[cooldown_key] = now
+        self.evidence_store.append({
+            "target_uuid": player_uuid,
+            "rule": "native_client_position_delta_advisory",
+            "code": "native_client_position_delta_advisory",
+            "severity": "warning",
+            "confidence": "low",
+            "high_confidence": False,
+            "source": "native_client_server_correlation",
+            "detail": f"客户端自报位置与服务端位置相差 {delta:.2f} 格；复核阈值 {tolerance:.2f} 格。",
+            "client_version": _clean(data.get("client_version"), 32),
+            "build_id": _clean(data.get("build_id"), 64),
+            "action": "review_only_no_punishment",
+        })
+        self._admin_alert(
+            f"§e双端位置遥测存在差异§r：UUID §7{player_uuid[:12]}…§r；客户端与服务端位置差 {delta:.1f} 格。仅供复核，不自动处罚。"
+        )
 
     # ----------------------------- session lifecycle -----------------------------
 
