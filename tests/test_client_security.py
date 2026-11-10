@@ -106,11 +106,16 @@ class NativeClientSecurityTests(unittest.TestCase):
             "platform": "android",
             "integrity": {"app_signature_valid": True, "tamper_detected": False},
             "runtime": {"fps": 60, "memory_mb": 512, "heartbeat_ms": 50},
+            "game": {
+                "client_pos_x": 12.5, "client_pos_y": 64.0, "client_pos_z": -9.25,
+                "network_rtt_ms": 85,
+            },
         }
         self.assertIsNotNone(validate_telemetry(valid))
         invalid = {**valid, "runtime": {"fps": 9999}}
         self.assertIsNone(validate_telemetry(invalid))
         self.assertIsNone(validate_telemetry({"integrity": {"tamper_detected": "false"}}))
+        self.assertIsNone(validate_telemetry({**valid, "game": {"client_pos_x": 1e100, "client_pos_y": 64, "client_pos_z": 1}}))
 
 
 if __name__ == "__main__":
