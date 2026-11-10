@@ -721,11 +721,13 @@ function handleScriptEvent(event) {
   if (!data || typeof data !== "object") return;
   if (data.version && data.version !== "zp-report-v1") return;
 
+  const allowedReportCategories = new Set(["恶意破坏", "攻击玩家", "辱骂", "外挂", "透视", "其他"]);
+  const reportCategory = cleanText(data.category, 32);
   const report = {
     targetId: cleanText(data.targetId, 128),
     targetName: cleanText(data.targetName, 64),
     reporterName: cleanText(data.reporterName, 64),
-    category: cleanText(data.category, 32),
+    category: allowedReportCategories.has(reportCategory) ? reportCategory : "其他",
     reason: cleanText(data.reason, 180),
     reportId: cleanText(data.reportId, 80)
   };
