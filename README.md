@@ -144,3 +144,18 @@ AI 默认本地运行且无需 API Key。配置中的 ai_api_enabled、ai_api_ke
 Endstone 增强层提供可选 ONNX Runtime CPU 推理适配器。默认加载插件数据目录下 `models/zp_ac_behavior.onnx`，也可用 `ai_onnx_model_path` 指定。安装依赖：`python -m pip install ".[onnx]"`。模型输入为 float32 `[N,7]`，顺序为 move_speed_mean、move_speed_peak、combat_rate、target_diversity、ore_ratio、click_cv、scaffold_rate；单输出解释为异常概率，多输出取最后一项作为异常类别分数。缺少模型/依赖/模型格式不符时，ONNX 自动停用，原统计引擎继续工作。
 
 数据采集默认开启，写入插件数据目录 `ai_dataset.jsonl`，每名玩家每 30 秒最多一条样本。记录包含 SHA-256 派生匿名 player_key、时间戳、数值特征和空标签，不保存玩家名、UUID、XUID或聊天内容；文件到达大小上限时轮转为 .1。样本必须人工审核标注：`python tools/label_ai_dataset.py <ai_dataset.jsonl> <64位player_key> normal|cheat`。当前仓库提供推理和数据采集/标注管线，**不包含已训练的生产模型**。ONNX 分数只通知管理员，不改变信用分、风险分或处罚状态。
+
+
+## GitHub 正式发布
+
+- 推送到 `main`：自动运行语法/单元测试、构建 `.mcaddon` 与 `.whl`，并将构建产物保存为 Actions Artifact（保留 90 天）。
+- 发布正式版本：确认版本号与兼容性后创建并推送版本标签，例如 `v0.9.0`。标签对应当前插件版本；构建脚本会同时打包行为包 2.1.9 和 Endstone 插件 0.9.0。
+- 推送 `v*` 标签会再次执行完整构建与测试，并自动创建 GitHub Release，将唯一的 `.mcaddon` 和 `.whl` 作为 Release 附件发布。包含 `rc` 或 `beta` 的标签会标记为预发布版本。
+- 下载位置：仓库 **Releases** 页面，而不是 **Packages** 页面。当前采用 GitHub Release 附件分发 Python wheel，不依赖 GitHub Packages 注册表。
+
+发布示例（仅在确认该版本准备好发布时执行）：
+
+```bash
+git tag v0.9.0
+git push origin v0.9.0
+```
