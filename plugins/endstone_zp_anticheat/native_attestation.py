@@ -452,15 +452,19 @@ class NativeAttestationHTTPServer:
 
         self.httpd = ThreadingHTTPServer((self.host, self.port), Handler)
         self.httpd.daemon_threads = True
-        if self.certfile or self.keyfile:
-            if not (self.certfile and self.keyfile):
-                raise ValueError("both TLS certificate and key paths are required")
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.minimum_version = ssl.TLSVersion.TLSv1_2
-            context.load_cert_chain(self.certfile, self.keyfile)
-            self.httpd.socket = context.wrap_socket(self.httpd.socket, server_side=True)
-        self.thread = threading.Thread(target=self.httpd.serve_forever, name="ZPAC-NativeAttestation", daemon=True)
-        self.thread.start()
+        try:
+            if self.certfile and self.keyfile:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                context.load_cert_chain(self.certfile, self.keyfile)
+                self.httpd.socket = context.wrap_socket(self.httpd.socket, server_side=True)
+            self.thread = threading.Thread(target=self.httpd.serve_forever, name="ZPAC-NativeAttestation", daemon=True)
+            self.thread.start()
+        except Exception:
+            self.httpd.server_close()
+            self.httpd = None
+            self.thread = None
+            raise
 
     def stop(self) -> None:
         server = self.httpd
